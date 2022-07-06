@@ -617,9 +617,11 @@ export abstract class CMakeDriver implements vscode.Disposable {
 
     private async _refreshExpansions() {
         return this.doRefreshExpansions(async () => {
-            this._sourceDirectory = await util.normalizeAndVerifySourceDir(await expand.expandString(this.config.sourceDirectory, CMakeDriver.sourceDirExpansionOptions(this.workspaceFolder)));
-
+            // HW: 为sourceDirectory添加更多的替换变量
+            const srcOpts = CMakeDriver.sourceDirExpansionOptions(this.workspaceFolder);
             const opts = this.expansionOptions;
+            this._sourceDirectory = await util.normalizeAndVerifySourceDir(await expand.expandString(this.config.sourceDirectory, {...opts, ...srcOpts}));
+
             opts.envOverride = await this.getConfigureEnvironment();
 
             if (!this.useCMakePresets) {
