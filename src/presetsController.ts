@@ -57,7 +57,8 @@ export class PresetsController {
                     sourceParentDir: '${sourceParentDir}',
                     sourceDirName: '${sourceDirName}',
                     presetName: '${presetName}'
-                }
+                },
+                variantVars: cmakeTools.variantVars
             };
             return util.normalizeAndVerifySourceDir(await expandString(dir, expansionOpts));
         };

@@ -391,6 +391,11 @@ export class CMakeTools implements api.CMakeToolsAPI {
     }
     private readonly activeVariant = new Property<string>('Unconfigured');
 
+    get variantVars() {
+        return this._variantVars;
+    }
+    private _variantVars: { [key: string]: string } = {};
+
     /**
      * The "launch target" (the target that will be run by debugging)
      */
@@ -854,16 +859,23 @@ export class CMakeTools implements api.CMakeToolsAPI {
     private async init() {
         log.debug(localize('second.phase.init', 'Starting CMakeTools second-phase init'));
 
-        this._sourceDir = await util.normalizeAndVerifySourceDir(
-            await expandString(this.workspaceContext.config.sourceDirectory, CMakeDriver.sourceDirExpansionOptions(this.folder.uri.fsPath))
-        );
-
         // Start up the variant manager
         await this.variantManager.initialize();
         // Set the status bar message
         this.activeVariant.set(this.variantManager.activeVariantOptions.short);
         // Restore the debug target
         this._launchTargetName.set(this.workspaceContext.state.launchTargetName || '');
+
+        const options = CMakeDriver.sourceDirExpansionOptions(this.folder.uri.fsPath);
+        const activeKeywordSetting = this.variantManager.activeKeywordSetting;
+        this._variantVars = options.variantVars || {};
+        if (activeKeywordSetting) {
+            activeKeywordSetting.forEach((value: string, key: string) => this._variantVars[key] = value);
+        }
+        options.variantVars = this._variantVars;
+        this._sourceDir = await util.normalizeAndVerifySourceDir(
+            await expandString(this.workspaceContext.config.sourceDirectory, options)
+        );
 
         // Hook up event handlers
         // Listen for the variant to change
