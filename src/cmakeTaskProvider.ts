@@ -33,7 +33,6 @@ enum CommandType {
     cleanRebuild = "cleanRebuild"
 }
 
-
 const localizeCommandType = (cmd: CommandType): string => {
     switch (cmd) {
         case CommandType.build: {
