@@ -19,6 +19,7 @@ import { ConfigurationReader } from '@cmt/config';
 import * as nls from 'vscode-nls';
 import { BuildPreset, ConfigurePreset, TestPreset } from '@cmt/preset';
 import { CodeModelContent } from './codeModel';
+import { VariantManager } from '@cmt/variant';
 
 nls.config({ messageFormat: nls.MessageFormat.bundle, bundleFormat: nls.BundleFormat.standalone })();
 const localize: nls.LocalizeFunc = nls.loadMessageBundle();
@@ -38,8 +39,13 @@ export class CMakeLegacyDriver extends CMakeDriver {
         throw new Error('Method not implemented.');
     }
 
-    private constructor(cmake: CMakeExecutable, readonly config: ConfigurationReader, workspaceFolder: string | null, preconditionHandler: CMakePreconditionProblemSolver) {
-        super(cmake, config, workspaceFolder, preconditionHandler);
+    private constructor(
+        cmake: CMakeExecutable,
+        readonly config: ConfigurationReader,
+        workspaceFolder: string | null,
+        preconditionHandler: CMakePreconditionProblemSolver,
+        variantManager: VariantManager | null) {
+        super(cmake, config, workspaceFolder, preconditionHandler, variantManager);
     }
 
     private _needsReconfigure = true;
@@ -144,9 +150,10 @@ export class CMakeLegacyDriver extends CMakeDriver {
         testPreset: TestPreset | null,
         workspaceFolder: string | null,
         preconditionHandler: CMakePreconditionProblemSolver,
-        preferredGenerators: CMakeGenerator[]): Promise<CMakeLegacyDriver> {
+        preferredGenerators: CMakeGenerator[],
+        variantManager: VariantManager | null): Promise<CMakeLegacyDriver> {
         log.debug(localize('creating.instance.of', 'Creating instance of {0}', "LegacyCMakeDriver"));
-        return this.createDerived(new CMakeLegacyDriver(cmake, config, workspaceFolder, preconditionHandler),
+        return this.createDerived(new CMakeLegacyDriver(cmake, config, workspaceFolder, preconditionHandler, variantManager),
             useCMakePresets,
             kit,
             configurePreset,

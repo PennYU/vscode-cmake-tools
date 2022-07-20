@@ -758,7 +758,8 @@ export class CMakeTools implements api.CMakeToolsAPI {
                         this.testPreset,
                         workspace,
                         preConditionHandler,
-                        preferredGenerators);
+                        preferredGenerators,
+                        this.variantManager);
                     break;
                 case serverApi:
                     drv = await CMakeServerDriver.create(cmake,
@@ -770,7 +771,8 @@ export class CMakeTools implements api.CMakeToolsAPI {
                         this.testPreset,
                         workspace,
                         preConditionHandler,
-                        preferredGenerators);
+                        preferredGenerators,
+                        this.variantManager);
                     break;
                 default:
                     drv = await CMakeLegacyDriver.create(cmake,
@@ -782,7 +784,8 @@ export class CMakeTools implements api.CMakeToolsAPI {
                         this.testPreset,
                         workspace,
                         preConditionHandler,
-                        preferredGenerators);
+                        preferredGenerators,
+                        this.variantManager);
             }
         } finally {
             this.statusMessage.set(localize('ready.status', 'Ready'));

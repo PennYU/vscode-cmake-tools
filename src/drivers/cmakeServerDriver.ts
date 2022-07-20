@@ -18,6 +18,7 @@ import * as nls from 'vscode-nls';
 import * as ext from '@cmt/extension';
 import { BuildPreset, ConfigurePreset, TestPreset } from '@cmt/preset';
 import { CodeModelConfiguration, CodeModelContent, CodeModelFileGroup, CodeModelProject, CodeModelTarget } from '@cmt/drivers/codeModel';
+import { VariantManager } from '@cmt/variant';
 
 nls.config({ messageFormat: nls.MessageFormat.bundle, bundleFormat: nls.BundleFormat.standalone })();
 const localize: nls.LocalizeFunc = nls.loadMessageBundle();
@@ -38,8 +39,13 @@ export class CMakeServerDriver extends CMakeDriver {
         throw new Error('Method not implemented.');
     }
 
-    private constructor(cmake: CMakeExecutable, readonly config: ConfigurationReader, workspaceFolder: string | null, preconditionHandler: CMakePreconditionProblemSolver) {
-        super(cmake, config, workspaceFolder, preconditionHandler);
+    private constructor(
+        cmake: CMakeExecutable,
+        readonly config: ConfigurationReader,
+        workspaceFolder: string | null,
+        preconditionHandler: CMakePreconditionProblemSolver,
+        variantManager: VariantManager | null) {
+        super(cmake, config, workspaceFolder, preconditionHandler, variantManager);
         this.config.onChange('environment', () => this._restartClient());
         this.config.onChange('configureEnvironment', () => this._restartClient());
     }
@@ -450,8 +456,9 @@ export class CMakeServerDriver extends CMakeDriver {
         testPreset: TestPreset | null,
         workspaceFolder: string | null,
         preconditionHandler: CMakePreconditionProblemSolver,
-        preferredGenerators: CMakeGenerator[]): Promise<CMakeServerDriver> {
-        return this.createDerived(new CMakeServerDriver(cmake, config, workspaceFolder, preconditionHandler),
+        preferredGenerators: CMakeGenerator[],
+        variantManager: VariantManager | null): Promise<CMakeServerDriver> {
+        return this.createDerived(new CMakeServerDriver(cmake, config, workspaceFolder, preconditionHandler, variantManager),
             useCMakePresets,
             kit,
             configurePreset,

@@ -506,7 +506,7 @@ class ExtensionManager implements vscode.Disposable {
         };
 
         const sourceDirectory: string = cmt.workspaceContext.config.sourceDirectory;
-        let expandedSourceDirectory: string = util.lightNormalizePath(await expandString(sourceDirectory, { vars: optsVars }));
+        let expandedSourceDirectory: string = util.lightNormalizePath(await expandString(sourceDirectory, { vars: optsVars, variantVars: cmt.variantVars }));
         if (path.basename(expandedSourceDirectory).toLocaleLowerCase() !== "cmakelists.txt") {
             expandedSourceDirectory = path.join(expandedSourceDirectory, "CMakeLists.txt");
         }

@@ -30,6 +30,7 @@ import { BuildPreset, ConfigurePreset, TestPreset } from '@cmt/preset';
 import { NoGeneratorError } from './cmakeServerDriver';
 
 import * as nls from 'vscode-nls';
+import { VariantManager } from '@cmt/variant';
 
 nls.config({ messageFormat: nls.MessageFormat.bundle, bundleFormat: nls.BundleFormat.standalone })();
 const localize: nls.LocalizeFunc = nls.loadMessageBundle();
@@ -47,8 +48,9 @@ export class CMakeFileApiDriver extends CMakeDriver {
     private constructor(cmake: CMakeExecutable,
         readonly config: ConfigurationReader,
         workspaceRootPath: string | null,
-        preconditionHandler: CMakePreconditionProblemSolver) {
-        super(cmake, config, workspaceRootPath, preconditionHandler);
+        preconditionHandler: CMakePreconditionProblemSolver,
+        variantManager: VariantManager | null) {
+        super(cmake, config, workspaceRootPath, preconditionHandler, variantManager);
     }
 
     static async create(cmake: CMakeExecutable,
@@ -60,9 +62,10 @@ export class CMakeFileApiDriver extends CMakeDriver {
         testPreset: TestPreset | null,
         workspaceRootPath: string | null,
         preconditionHandler: CMakePreconditionProblemSolver,
-        preferredGenerators: CMakeGenerator[]): Promise<CMakeFileApiDriver> {
+        preferredGenerators: CMakeGenerator[],
+        variantManager: VariantManager | null,): Promise<CMakeFileApiDriver> {
         log.debug('Creating instance of CMakeFileApiDriver');
-        return this.createDerived(new CMakeFileApiDriver(cmake, config, workspaceRootPath, preconditionHandler),
+        return this.createDerived(new CMakeFileApiDriver(cmake, config, workspaceRootPath, preconditionHandler, variantManager),
             useCMakePresets,
             kit,
             configurePreset,

@@ -105,6 +105,7 @@ export async function expandString<T>(tmpl: string | T, opts: ExpansionOptions):
     let result = tmpl;
     let didReplacement = false;
     let circularReference: string | undefined;
+    let missingVariants: Map<string, any>;
 
     let i = 0;
     do {
@@ -113,6 +114,7 @@ export async function expandString<T>(tmpl: string | T, opts: ExpansionOptions):
         result = expansion.result;
         didReplacement = expansion.didReplacement;
         circularReference = expansion.circularReference;
+        missingVariants = expansion.missingVariants;
         i++;
     } while (i < MAX_RECURSION && opts.recursive && didReplacement && !circularReference);
 
@@ -120,6 +122,12 @@ export async function expandString<T>(tmpl: string | T, opts: ExpansionOptions):
         log.warning(localize('circular.variable.reference', 'Circular variable reference found: {0}', circularReference));
     } else if (i === MAX_RECURSION) {
         log.error(localize('reached.max.recursion', 'Reached max string expansion recursion. Possible circular reference.'));
+    }
+
+    if (missingVariants.size > 0) {
+        missingVariants.forEach((value, key) => {
+            log.warning(localize('missing.variant.choice', 'Missing variant choice {0} on {1} in variant definition.', `"${key}"`, `"${JSON.stringify(value)}"`));
+        })
     }
 
     return replaceAll(result, '${dollar}', '$');
@@ -130,6 +138,7 @@ async function expandStringHelper(tmpl: string, opts: ExpansionOptions) {
     const env = EnvironmentUtils.create(envPreNormalize);
     const repls = opts.vars;
     let circularReference: string | undefined;
+    let missingVariants: Map<string, any> = new Map();
 
     // We accumulate a list of substitutions that we need to make, preventing
     // recursively expanding or looping forever on bad replacements
@@ -217,6 +226,9 @@ async function expandStringHelper(tmpl: string, opts: ExpansionOptions) {
             const varname = mat[1];
             const repl = variants[varname] || '';
             subs.set(full, repl);
+            if (Object.keys(variants).indexOf(varname) < 0) {
+                missingVariants.set(varname, variants);
+            }
         }
     }
 
@@ -247,5 +259,5 @@ async function expandStringHelper(tmpl: string, opts: ExpansionOptions) {
             didReplacement = true;
         }
     });
-    return { result: final_str, didReplacement, circularReference };
+    return { result: final_str, didReplacement, circularReference, missingVariants };
 }

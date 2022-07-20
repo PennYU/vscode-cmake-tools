@@ -24,7 +24,7 @@ import * as proc from '@cmt/proc';
 import rollbar from '@cmt/rollbar';
 import * as telemetry from '@cmt/telemetry';
 import * as util from '@cmt/util';
-import { ConfigureArguments, VariantOption } from '@cmt/variant';
+import { ConfigureArguments, VariantOption, VariantManager } from '@cmt/variant';
 import * as nls from 'vscode-nls';
 import { majorVersionSemver, minorVersionSemver, parseTargetTriple, TargetTriple } from '@cmt/triple';
 import * as preset from '@cmt/preset';
@@ -146,7 +146,8 @@ export abstract class CMakeDriver implements vscode.Disposable {
     protected constructor(public readonly cmake: CMakeExecutable,
         readonly config: ConfigurationReader,
         private readonly __workspaceFolder: string | null,
-        readonly preconditionHandler: CMakePreconditionProblemSolver) {
+        readonly preconditionHandler: CMakePreconditionProblemSolver,
+        readonly variantManager: VariantManager | null) {
         // We have a cache of file-compilation terminals. Wipe them out when the
         // user closes those terminals.
         vscode.window.onDidCloseTerminal(closed => {
@@ -620,8 +621,16 @@ export abstract class CMakeDriver implements vscode.Disposable {
         return this.doRefreshExpansions(async () => {
             // HW: 为sourceDirectory添加更多的替换变量
             const srcOpts = CMakeDriver.sourceDirExpansionOptions(this.workspaceFolder);
+            srcOpts.variantVars && (srcOpts.variantVars = {});
             const opts = this.expansionOptions;
-            this._sourceDirectory = await util.normalizeAndVerifySourceDir(await expand.expandString(this.config.sourceDirectory, {...opts, ...srcOpts}));
+            opts.variantVars && (opts.variantVars = {});
+            if (this.variantManager?.haveVariant) {
+                this.variantManager.activeKeywordSetting?.forEach((value, key) => {
+                    srcOpts.variantVars && (srcOpts.variantVars[key] = value);
+                    opts.variantVars && (opts.variantVars[key] = value);
+                })
+            }
+            this._sourceDirectory = await util.normalizeAndVerifySourceDir(await expand.expandString(this.config.sourceDirectory, srcOpts));
 
             opts.envOverride = await this.getConfigureEnvironment();
 
