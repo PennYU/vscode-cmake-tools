@@ -127,7 +127,7 @@ export async function expandString<T>(tmpl: string | T, opts: ExpansionOptions):
     if (missingVariants.size > 0) {
         missingVariants.forEach((value, key) => {
             log.warning(localize('missing.variant.choice', 'Missing variant choice {0} on {1} in variant definition.', `"${key}"`, `"${JSON.stringify(value)}"`));
-        })
+        });
     }
 
     return replaceAll(result, '${dollar}', '$');
@@ -137,8 +137,8 @@ async function expandStringHelper(tmpl: string, opts: ExpansionOptions) {
     const envPreNormalize = opts.envOverride ? opts.envOverride : process.env;
     const env = EnvironmentUtils.create(envPreNormalize);
     const repls = opts.vars;
+    const missingVariants = new Map<string, any>();
     let circularReference: string | undefined;
-    let missingVariants: Map<string, any> = new Map();
 
     // We accumulate a list of substitutions that we need to make, preventing
     // recursively expanding or looping forever on bad replacements
