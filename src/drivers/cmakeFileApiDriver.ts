@@ -63,7 +63,7 @@ export class CMakeFileApiDriver extends CMakeDriver {
         workspaceRootPath: string | null,
         preconditionHandler: CMakePreconditionProblemSolver,
         preferredGenerators: CMakeGenerator[],
-        variantManager: VariantManager | null,): Promise<CMakeFileApiDriver> {
+        variantManager: VariantManager | null): Promise<CMakeFileApiDriver> {
         log.debug('Creating instance of CMakeFileApiDriver');
         return this.createDerived(new CMakeFileApiDriver(cmake, config, workspaceRootPath, preconditionHandler, variantManager),
             useCMakePresets,

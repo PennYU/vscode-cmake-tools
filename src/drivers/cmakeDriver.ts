@@ -622,8 +622,8 @@ export abstract class CMakeDriver implements vscode.Disposable {
             // HW: 为sourceDirectory添加更多的替换变量
             const srcOpts = CMakeDriver.sourceDirExpansionOptions(this.workspaceFolder);
             const opts = this.expansionOptions;
-            if (this.variantManager?.haveVariant) {
-                this.variantManager.activeKeywordSetting?.forEach((value, key) => {
+            if (this.variantManager && this.variantManager.activeKeywordSetting) {
+                this.variantManager.activeKeywordSetting.forEach((value, key) => {
                     if (!srcOpts.variantVars) {
                         srcOpts.variantVars = {};
                     }
