@@ -18,6 +18,7 @@
 	"loaded.new.variants.set": "Yeni varyant kümesi yüklendi",
 	"missing.setting.in.variant": "Varyant tanımında {0} ayarı eksik.",
 	"missing.variant.choice": "Varyant tanımındaki {1} üzerinde {0} varyant seçimi eksik.",
+	"variant.not.defined": "varian tidak didefinisikan {0}.",
 	"incompatible.variant": "Son varyant seçimi, mevcut varyant tanımıyla uyumlu değil.",
 	"using.default.variant.choices": "Varyant tanımındaki varsayılan varyant seçimleri kullanılıyor.",
 	"select.a.variant.placeholder": "Bir derleme varyantı seçin"

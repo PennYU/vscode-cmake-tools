@@ -125,8 +125,8 @@ export async function expandString<T>(tmpl: string | T, opts: ExpansionOptions):
     }
 
     if (missingVariants.size > 0) {
-        missingVariants.forEach((value, key) => {
-            log.warning(localize('missing.variant.choice', 'Missing variant choice {0} on {1} in variant definition.', `"${key}"`, `"${JSON.stringify(value)}"`));
+        missingVariants.forEach((_, key) => {
+            log.warning(localize('variant.not.defined', 'Variant not defined {0}.', `"${key}"`));
         });
     }
 

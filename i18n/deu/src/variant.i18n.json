@@ -18,6 +18,7 @@
 	"loaded.new.variants.set": "Neue Varianten wurden geladen.",
 	"missing.setting.in.variant": "Fehlende Einstellung {0} in Variantendefinition.",
 	"missing.variant.choice": "Fehlende Variantenauswahl {0} für {1} in Variantendefinition.",
+	"variant.not.defined": "Variante nicht definiert {0}.",
 	"incompatible.variant": "Die letzte Variantenauswahl ist mit der aktuellen Variantendefinition inkompatibel.",
 	"using.default.variant.choices": "Die Standardvariantenauswahl aus der Variantendefinition wird verwendet.",
 	"select.a.variant.placeholder": "Auswahl einer Buildvariante"

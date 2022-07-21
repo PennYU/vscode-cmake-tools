@@ -18,6 +18,7 @@
 	"loaded.new.variants.set": "Se cargó un nuevo conjunto de variantes.",
 	"missing.setting.in.variant": "Falta el valor {0} en la definición de la variante.",
 	"missing.variant.choice": "Falta la opción de variante {0} en {1} en la definición de la variante.",
+	"variant.not.defined": "varianto ne definita {0}.",
 	"incompatible.variant": "La última selección de variante no es compatible con la definición de variante presente.",
 	"using.default.variant.choices": "Usando las opciones de variante predeterminadas de la definición de variante.",
 	"select.a.variant.placeholder": "Seleccione una variante de compilación"
