@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import * as api from '@cmt/api';
 import { CMakeExecutable } from '@cmt/cmake/cmakeExecutable';
 import * as codepages from '@cmt/codePageTable';
-import { ConfigureTrigger } from "@cmt/cmakeProject";
+import { ConfigureTrigger } from "@cmt/cmakeTools";
 import { CompileCommand } from '@cmt/compilationDatabase';
 import { ConfigurationReader, defaultNumJobs } from '@cmt/config';
 import { CMakeBuildConsumer, CompileOutputConsumer } from '@cmt/diagnostics/build';
@@ -24,15 +24,13 @@ import * as proc from '@cmt/proc';
 import rollbar from '@cmt/rollbar';
 import * as telemetry from '@cmt/telemetry';
 import * as util from '@cmt/util';
-import { ConfigureArguments, VariantOption } from '@cmt/variant';
+import { ConfigureArguments, VariantOption, VariantManager } from '@cmt/variant';
 import * as nls from 'vscode-nls';
 import { majorVersionSemver, minorVersionSemver, parseTargetTriple, TargetTriple } from '@cmt/triple';
 import * as preset from '@cmt/preset';
 import * as codeModel from '@cmt/drivers/codeModel';
-import { DiagnosticsConfiguration } from '@cmt/cmakeWorkspaceFolder';
+import { DiagnosticsConfiguration } from '@cmt/folders';
 import { Environment, EnvironmentUtils } from '@cmt/environmentVariables';
-import { CustomBuildTaskTerminal } from '@cmt/cmakeTaskProvider';
-import { getValue } from '@cmt/preset';
 
 nls.config({ messageFormat: nls.MessageFormat.bundle, bundleFormat: nls.BundleFormat.standalone })();
 const localize: nls.LocalizeFunc = nls.loadMessageBundle();
@@ -73,7 +71,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
      *
      * @returns The exit code from CMake
      */
-    protected abstract doConfigure(extra_args: string[], consumer?: proc.OutputConsumer, showCommandOnly?: boolean, configurePreset?: preset.ConfigurePreset | null, options?: proc.ExecutionOptions): Promise<number>;
+    protected abstract doConfigure(extra_args: string[], consumer?: proc.OutputConsumer, showCommandOnly?: boolean): Promise<number>;
     protected abstract doCacheConfigure(): Promise<number>;
 
     private _isConfiguredAtLeastOnce = false;
@@ -148,7 +146,8 @@ export abstract class CMakeDriver implements vscode.Disposable {
     protected constructor(public readonly cmake: CMakeExecutable,
         readonly config: ConfigurationReader,
         private readonly __workspaceFolder: string | null,
-        readonly preconditionHandler: CMakePreconditionProblemSolver) {
+        readonly preconditionHandler: CMakePreconditionProblemSolver,
+        readonly variantManager: VariantManager | null) {
         // We have a cache of file-compilation terminals. Wipe them out when the
         // user closes those terminals.
         vscode.window.onDidCloseTerminal(closed => {
@@ -199,22 +198,18 @@ export abstract class CMakeDriver implements vscode.Disposable {
     /**
      * Get the environment variables that should be set at CMake-configure time.
      */
-    async getConfigureEnvironment(configurePreset?: preset.ConfigurePreset | null, extraEnvironmentVariables?: Environment): Promise<Environment> {
-        let envs;
+    async getConfigureEnvironment(): Promise<Environment> {
         if (this.useCMakePresets) {
-            envs = EnvironmentUtils.create(configurePreset ? configurePreset.environment : this._configurePreset?.environment);
+            return EnvironmentUtils.create(this._configurePreset?.environment);
         } else {
-            envs = this._kitEnvironmentVariables;
+            let envs = this._kitEnvironmentVariables;
             /* NOTE: By mergeEnvironment one by one to enable expanding self containd variable such as PATH properly */
             /* If configureEnvironment and environment both configured different PATH, doing this will preserve them all */
             envs = EnvironmentUtils.merge([envs, await this.computeExpandedEnvironment(this.config.environment, envs)]);
             envs = EnvironmentUtils.merge([envs, await this.computeExpandedEnvironment(this.config.configureEnvironment, envs)]);
             envs = EnvironmentUtils.merge([envs, await this.computeExpandedEnvironment(this._variantEnv, envs)]);
+            return envs;
         }
-        if (extraEnvironmentVariables) {
-            envs = EnvironmentUtils.merge([envs, await this.computeExpandedEnvironment(extraEnvironmentVariables, envs)]);
-        }
-        return envs;
     }
 
     /**
@@ -447,6 +442,14 @@ export abstract class CMakeDriver implements vscode.Disposable {
 
         this._binaryDir = configurePreset.binaryDir || '';
 
+        const getValue = (obj: string | preset.ValueStrategy) => {
+            if (util.isString(obj)) {
+                return obj;
+            } else if (obj.strategy === 'set') {
+                return obj.value;
+            }
+        };
+
         if (configurePreset.generator) {
             this._generator = {
                 name: configurePreset.generator,
@@ -614,12 +617,26 @@ export abstract class CMakeDriver implements vscode.Disposable {
         return cb();
     }
 
-    private async _refreshExpansions(configurePreset?: preset.ConfigurePreset | null) {
+    private async _refreshExpansions() {
         return this.doRefreshExpansions(async () => {
-            this._sourceDirectory = await util.normalizeAndVerifySourceDir(await expand.expandString(this.config.sourceDirectory, CMakeDriver.sourceDirExpansionOptions(this.workspaceFolder)));
-
+            // HW: 为sourceDirectory添加更多的替换变量
+            const srcOpts = CMakeDriver.sourceDirExpansionOptions(this.workspaceFolder);
             const opts = this.expansionOptions;
-            opts.envOverride = await this.getConfigureEnvironment(configurePreset);
+            if (this.variantManager && this.variantManager.activeKeywordSetting) {
+                this.variantManager.activeKeywordSetting.forEach((value, key) => {
+                    if (!srcOpts.variantVars) {
+                        srcOpts.variantVars = {};
+                    }
+                    srcOpts.variantVars[key] = value;
+                    if (!opts.variantVars) {
+                        opts.variantVars = {};
+                    }
+                    opts.variantVars[key] = value;
+                });
+            }
+            this._sourceDirectory = await util.normalizeAndVerifySourceDir(await expand.expandString(this.config.sourceDirectory, srcOpts));
+
+            opts.envOverride = await this.getConfigureEnvironment();
 
             if (!this.useCMakePresets) {
                 this._binaryDir = util.lightNormalizePath(await expand.expandString(this.config.buildDirectory, opts));
@@ -1177,7 +1194,8 @@ export abstract class CMakeDriver implements vscode.Disposable {
         "Sublime Text 2 - Unix Makefiles"
     ];
 
-    private getGeneratorNameForTelemetry(generator: string | null = this.generatorName): string {
+    private getGeneratorNameForTelemetry(): string {
+        const generator = this.generatorName;
         if (generator) {
             return this.cmakeGenerators.find(g => generator.startsWith(g)) ?? 'other';
         }
@@ -1200,30 +1218,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
             true : false;
     }
 
-    public generateConfigArgsFromPreset(configPreset: preset.ConfigurePreset): string[] {
-        // Cache flags will construct the command line for cmake.
-        const init_cache_flags = this.generateInitCacheFlags();
-        return init_cache_flags.concat(preset.configureArgs(configPreset));
-    }
-
-    public async generateConfigArgsFromSettings(extra_args: string[] = [], withoutCmakeSettings: boolean = false): Promise<string[]> {
-        // Cache flags will construct the command line for cmake.
-        const init_cache_flags = this.generateInitCacheFlags();
-        const common_flags = ['--no-warn-unused-cli'].concat(extra_args, this.config.configureArgs);
-        const define_flags = withoutCmakeSettings ? [] : this.generateCMakeSettingsFlags();
-        const final_flags = common_flags.concat(define_flags, init_cache_flags);
-
-        // Get expanded configure environment
-        const expanded_configure_env = await this.getConfigureEnvironment();
-
-        // Expand all flags
-        const opts = this.expansionOptions;
-        const expanded_flags_promises = final_flags.map(
-            async (value: string) => expand.expandString(value, { ...opts, envOverride: expanded_configure_env }));
-        return Promise.all(expanded_flags_promises);
-    }
-
-    async configure(trigger: ConfigureTrigger, extra_args: string[], consumer?: proc.OutputConsumer, withoutCmakeSettings: boolean = false, showCommandOnly?: boolean, presetOverride?: preset.ConfigurePreset, options?: proc.ExecutionOptions): Promise<number> {
+    async configure(trigger: ConfigureTrigger, extra_args: string[], consumer?: proc.OutputConsumer, withoutCmakeSettings: boolean = false, showCommandOnly?: boolean): Promise<number> {
         // Check if the configuration is using cache in the first configuration and adjust the logging messages based on that.
         const shouldUseCachedConfiguration: boolean = this.shouldUseCachedConfiguration(trigger);
 
@@ -1243,7 +1238,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
         try {
             // _beforeConfigureOrBuild needs to refresh expansions early because it reads various settings
             // (example: cmake.sourceDirectory).
-            await this._refreshExpansions(presetOverride);
+            await this._refreshExpansions();
             if (!showCommandOnly) {
                 if (!shouldUseCachedConfiguration) {
                     log.debug(localize('start.configure', 'Start configure'), extra_args);
@@ -1257,24 +1252,37 @@ export abstract class CMakeDriver implements vscode.Disposable {
                 return -2;
             }
 
+            // Cache flags will construct the command line for cmake.
+            const init_cache_flags = this.generateInitCacheFlags();
+
             let expanded_flags: string[];
             if (this.useCMakePresets) {
-                const configurePreset: preset.ConfigurePreset | undefined | null = (trigger === ConfigureTrigger.taskProvider) ? presetOverride : this._configurePreset;
-                if (!configurePreset) {
+                if (!this._configurePreset) {
                     log.debug(localize('no.config.Preset', 'No configure preset selected'));
                     return -3;
                 }
                 // For now, fields in presets are expanded when the preset is selected
-                expanded_flags = this.generateConfigArgsFromPreset(configurePreset);
+                expanded_flags = init_cache_flags.concat(preset.configureArgs(this._configurePreset));
             } else {
-                expanded_flags = await this.generateConfigArgsFromSettings(extra_args, withoutCmakeSettings);
+                const common_flags = ['--no-warn-unused-cli'].concat(extra_args, this.config.configureArgs);
+                const define_flags = withoutCmakeSettings ? [] : this.generateCMakeSettingsFlags();
+                const final_flags = common_flags.concat(define_flags, init_cache_flags);
+
+                // Get expanded configure environment
+                const expanded_configure_env = await this.getConfigureEnvironment();
+
+                // Expand all flags
+                const opts = this.expansionOptions;
+                const expanded_flags_promises = final_flags.map(
+                    async (value: string) => expand.expandString(value, { ...opts, envOverride: expanded_configure_env }));
+                expanded_flags = await Promise.all(expanded_flags_promises);
             }
             if (!shouldUseCachedConfiguration) {
                 log.trace(localize('cmake.flags.are', 'CMake flags are {0}', JSON.stringify(expanded_flags)));
             }
 
             // A more complete round of expansions
-            await this._refreshExpansions(presetOverride);
+            await this._refreshExpansions();
 
             const timeStart: number = new Date().getTime();
             let retc: number;
@@ -1283,7 +1291,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
                 this._isConfiguredAtLeastOnce = true;
                 return retc;
             } else {
-                retc = await this.doConfigure(expanded_flags, consumer, showCommandOnly, presetOverride, options);
+                retc = await this.doConfigure(expanded_flags, consumer, showCommandOnly);
                 this._isConfiguredAtLeastOnce = true;
             }
             const timeEnd: number = new Date().getTime();
@@ -1293,7 +1301,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
             if (this.useCMakePresets) {
                 telemetryProperties = {
                     CMakeExecutableVersion: cmakeVersion ? util.versionToString(cmakeVersion) : '',
-                    CMakeGenerator: this.getGeneratorNameForTelemetry(presetOverride?.generator || this.generatorName),
+                    CMakeGenerator: this.getGeneratorNameForTelemetry(),
                     Preset: this.useCMakePresets ? 'true' : 'false',
                     Trigger: trigger,
                     ShowCommandOnly: showCommandOnly ? 'true' : 'false'
@@ -1391,7 +1399,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
                     });
                     telemetryMeasures['ErrorCount'] = errorCount;
                     telemetryMeasures['WarningCount'] = warningCount;
-                } else if (!(consumer instanceof CustomBuildTaskTerminal)) {
+                } else {
                     // Wrong type: shouldn't get here, just in case
                     rollbar.error('Wrong build result type.');
                     telemetryMeasures['ErrorCount'] = retc ? 1 : 0;
@@ -1535,7 +1543,7 @@ export abstract class CMakeDriver implements vscode.Disposable {
                     }
                     telemetryMeasures['ErrorCount'] = errorCount;
                     telemetryMeasures['WarningCount'] = warningCount;
-                } else if (!(consumer instanceof CustomBuildTaskTerminal)) {
+                } else {
                     // Wrong type: shouldn't get here, just in case
                     rollbar.error('Wrong build result type.');
                     telemetryMeasures['ErrorCount'] = (await child.result).retc ? 1 : 0;
@@ -1614,85 +1622,76 @@ export abstract class CMakeDriver implements vscode.Disposable {
         return targetnames;
     }
 
-    getCMakeCommand(): string {
-        return this.cmake.path ? this.cmake.path : "cmake";
-    }
-
-    // Create a command for a given build preset.
-    async generateBuildCommandFromPreset(buildPreset: preset.BuildPreset, targets?: string[]): Promise<proc.BuildCommand | null> {
-        if (targets && targets.length > 0) {
-            buildPreset.__targets = targets;
-        } else {
-            buildPreset.__targets = buildPreset.targets;
-        }
-        const args = preset.buildArgs(buildPreset);
-        log.trace(localize('cmake.build.args.are', 'CMake build args are: {0}', JSON.stringify(args)));
-        return { command: this.cmake.path, args, build_env: EnvironmentUtils.create(buildPreset.environment) };
-    }
-
-    async generateBuildCommandFromSettings(targets?: string[]): Promise<proc.BuildCommand | null> {
-        if (!targets || targets.length === 0) {
-            return null;
-        }
-
-        const gen = this.generatorName;
-        targets = this.correctAllTargetName(targets);
-
-        const buildArgs: string[] = this.config.buildArgs.slice(0);
-        const buildToolArgs: string[] = ['--'].concat(this.config.buildToolArgs);
-
-        const configurationScope = this.workspaceFolder ? vscode.Uri.file(this.workspaceFolder) : null;
-        const parallelJobsSetting = vscode.workspace.getConfiguration("cmake", configurationScope).inspect<number|undefined>('parallelJobs');
-        let numJobs: number | undefined = (parallelJobsSetting?.globalValue || parallelJobsSetting?.workspaceValue || parallelJobsSetting?.workspaceFolderValue);
-        // for Ninja generator, don't '-j' argument if user didn't define number of jobs
-        // let numJobs: number | undefined = this.config.numJobs;
-        if (numJobs === undefined && gen && !/Ninja/.test(gen)) {
-            numJobs = defaultNumJobs();
-        }
-        // for msbuild generators, only add '-j' argument if parallelJobs > 1
-        if (numJobs && ((gen && !/Visual Studio/.test(gen)) || numJobs > 1)) {
-            // Prefer using CMake's build options to set parallelism over tool-specific switches.
-            // The feature is not available until version 3.14.
-            if (this.cmake.version && util.versionGreaterOrEquals(this.cmake.version, util.parseVersion('3.14.0'))) {
-                buildArgs.push('-j');
-                if (numJobs) {
-                    buildArgs.push(numJobs.toString());
-                }
-            } else {
-                if (gen) {
-                    if (/(Unix|MinGW) Makefiles|Ninja/.test(gen) && targets !== ['clean']) {
-                        buildToolArgs.push('-j', numJobs.toString());
-                    } else if (/Visual Studio/.test(gen) && targets !== ['clean']) {
-                        buildToolArgs.push('/maxcpucount:' + numJobs.toString());
-                    }
-                }
-            }
-        }
-
-        const ninja_env = EnvironmentUtils.create();
-        ninja_env['NINJA_STATUS'] = '[%s/%t %p :: %e] ';
-        const build_env = await this.getCMakeBuildCommandEnvironment(ninja_env);
-
-        const args = ['--build', this.binaryDir, '--config', this.currentBuildType, '--target', ...targets]
-            .concat(buildArgs, buildToolArgs);
-        const opts = this.expansionOptions;
-        const expanded_args_promises = args.map(async (value: string) => expand.expandString(value, { ...opts, envOverride: build_env }));
-        const expanded_args = await Promise.all(expanded_args_promises) as string[];
-
-        log.trace(localize('cmake.build.args.are', 'CMake build args are: {0}', JSON.stringify(expanded_args)));
-
-        return { command: this.cmake.path, args: expanded_args, build_env };
-    }
-
     async getCMakeBuildCommand(targets?: string[]): Promise<proc.BuildCommand | null> {
         if (this.useCMakePresets) {
             if (!this._buildPreset) {
                 log.debug(localize('no.build.preset', 'No build preset selected'));
                 return null;
             }
-            return this.generateBuildCommandFromPreset(this._buildPreset, targets);
+
+            if (targets && targets.length > 0) {
+                this._buildPreset.__targets = targets;
+            } else {
+                this._buildPreset.__targets = this._buildPreset.targets;
+            }
+
+            const args = preset.buildArgs(this._buildPreset);
+
+            log.trace(localize('cmake.build.args.are', 'CMake build args are: {0}', JSON.stringify(args)));
+
+            return { command: this.cmake.path, args, build_env: EnvironmentUtils.create(this._buildPreset.environment) };
         } else {
-            return this.generateBuildCommandFromSettings(targets);
+            if (!targets || targets.length === 0) {
+                return null;
+            }
+
+            const gen = this.generatorName;
+            targets = this.correctAllTargetName(targets);
+
+            const buildArgs: string[] = this.config.buildArgs.slice(0);
+            const buildToolArgs: string[] = ['--'].concat(this.config.buildToolArgs);
+
+            const configurationScope = this.workspaceFolder ? vscode.Uri.file(this.workspaceFolder) : null;
+            const parallelJobsSetting = vscode.workspace.getConfiguration("cmake", configurationScope).inspect<number|undefined>('parallelJobs');
+            let numJobs: number | undefined = (parallelJobsSetting?.globalValue || parallelJobsSetting?.workspaceValue || parallelJobsSetting?.workspaceFolderValue);
+            // for Ninja generator, don't '-j' argument if user didn't define number of jobs
+            // let numJobs: number | undefined = this.config.numJobs;
+            if (numJobs === undefined && gen && !/Ninja/.test(gen)) {
+                numJobs = defaultNumJobs();
+            }
+            // for msbuild generators, only add '-j' argument if parallelJobs > 1
+            if (numJobs && ((gen && !/Visual Studio/.test(gen)) || numJobs > 1)) {
+                // Prefer using CMake's build options to set parallelism over tool-specific switches.
+                // The feature is not available until version 3.14.
+                if (this.cmake.version && util.versionGreaterOrEquals(this.cmake.version, util.parseVersion('3.14.0'))) {
+                    buildArgs.push('-j');
+                    if (numJobs) {
+                        buildArgs.push(numJobs.toString());
+                    }
+                } else {
+                    if (gen) {
+                        if (/(Unix|MinGW) Makefiles|Ninja/.test(gen) && targets !== ['clean']) {
+                            buildToolArgs.push('-j', numJobs.toString());
+                        } else if (/Visual Studio/.test(gen) && targets !== ['clean']) {
+                            buildToolArgs.push('/maxcpucount:' + numJobs.toString());
+                        }
+                    }
+                }
+            }
+
+            const ninja_env = EnvironmentUtils.create();
+            ninja_env['NINJA_STATUS'] = '[%s/%t %p :: %e] ';
+            const build_env = await this.getCMakeBuildCommandEnvironment(ninja_env);
+
+            const args = ['--build', this.binaryDir, '--config', this.currentBuildType, '--target', ...targets]
+                .concat(buildArgs, buildToolArgs);
+            const opts = this.expansionOptions;
+            const expanded_args_promises = args.map(async (value: string) => expand.expandString(value, { ...opts, envOverride: build_env }));
+            const expanded_args = await Promise.all(expanded_args_promises) as string[];
+
+            log.trace(localize('cmake.build.args.are', 'CMake build args are: {0}', JSON.stringify(expanded_args)));
+
+            return { command: this.cmake.path, args: expanded_args, build_env };
         }
     }
 

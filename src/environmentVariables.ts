@@ -33,12 +33,12 @@ class EnvironmentPrivate {
     /* Using envProperty symbol is to provide valid implemention for [inspect]() */
     public [envProperty]: EnvironmentWithNull;
     protected options: EnvironmentOptions;
-    constructor(options?: EnvironmentOptions) {
+    constructor(_options?: EnvironmentOptions) {
         this.keyMapping = new Map<string, string>();
         this[envProperty] = {};
         this.options = {
-            preserveNull: options?.preserveNull,
-            isWin32: options?.isWin32
+            preserveNull: _options?.preserveNull,
+            isWin32: _options?.isWin32
         };
         if (this.options.preserveNull === undefined) {
             this.options.preserveNull = false;

@@ -10,9 +10,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import * as kitsController from '@cmt/kitsController';
 
-import CMakeProject from './cmakeProject';
+import CMakeTools from './cmakeTools';
 import * as expand from './expand';
-import { VSInstallation, vsInstallations, getHostTargetArchString, varsForVSInstallation, generatorPlatformFromVSArch } from './installs/visualStudio';
+import { VSInstallation, vsInstallations, getHostTargetArchString, varsForVSInstallation, generatorPlatformFromVSArch } from './installs/visual-studio';
 import * as logging from './logging';
 import paths from './paths';
 import { fs } from './pr';
@@ -157,8 +157,8 @@ export async function getCompilerVersion(vendor: CompilerVendorEnum, binPath: st
     if (pr) {
         pr.report({ message: localize('getting.compiler.version', 'Getting {0} version for {1}', vendor, binPath) });
     }
-    const exec = await proc.execute(binPath, ['-v'], undefined, { overrideLocale: true, timeout: 60000 }).result;
-    if (exec.retc !== 0 && !exec.stderr) {
+    const exec = await proc.execute(binPath, ['-v'], undefined, { overrideLocale: true, timeout: 30000 }).result;
+    if (exec.retc !== 0) {
         log.debug(localize('bad.compiler.binary', 'Bad {0} binary ("-v" returns {1}): {2}', vendor, exec.retc, binPath));
         return null;
     }
@@ -284,10 +284,8 @@ export async function kitIfCompiler(bin: string, pr?: ProgressReporter): Promise
     // Check by filename what the compiler might be. This is just heuristic.
     const gcc_regex = /^((\w+-)*)gcc(-\d+(\.\d+(\.\d+)?)?)?(\.exe)?$/;
     const clang_regex = /^clang(-\d+(\.\d+(\.\d+)?)?)?(\.exe)?$/;
-    const clang_cl_regex = /^clang\-cl(-\d+(\.\d+(\.\d+)?)?)?(\.exe)?$/;
     const gcc_res = gcc_regex.exec(fname);
     const clang_res = clang_regex.exec(fname);
-    const clang_cl_res = clang_cl_regex.exec(fname);
     if (gcc_res) {
         const version = await getCompilerVersion('GCC', bin, pr);
         if (version === null) {
@@ -349,7 +347,7 @@ export async function kitIfCompiler(bin: string, pr?: ProgressReporter): Promise
                 // Check for working mingw32-make
                 const execMake = await proc.execute(mingwMakePath, ['-v'], null, { environment: { PATH: ENV_PATH }, timeout: 30000 }).result;
                 if (execMake.retc !== 0) {
-                    log.debug(localize('bad.mingw32-make.binary', 'Bad mingw32-make binary ({0} returns non-zero): {1}', "\"-v\"", bin));
+                    log.debug(localize('bad.mingw32-make.binary', 'Bad mingw32-make binary ("-v" returns non-zero): {0}', bin));
                 } else {
                     let make_version_output = execMake.stdout;
                     if (make_version_output.length === 0) {
@@ -370,7 +368,7 @@ export async function kitIfCompiler(bin: string, pr?: ProgressReporter): Promise
         }
         return gccKit;
 
-    } else if (clang_res || clang_cl_res) {
+    } else if (clang_res) {
         const version = await getCompilerVersion('Clang', bin, pr);
         if (version === null) {
             return null;
@@ -385,7 +383,7 @@ export async function kitIfCompiler(bin: string, pr?: ProgressReporter): Promise
         }
 
         const clangCompilers: { [lang: string]: string } = {};
-        const clangxx_fname = clang_cl_res ? fname : fname.replace(/^clang/, 'clang++');
+        const clangxx_fname = fname.replace(/^clang/, 'clang++');
         const clangxx_bin1 = path.join(path.dirname(bin), clangxx_fname);
         log.debug(localize('detected.clang.compiler', 'Detected Clang compiler: {0}', bin));
         if (await fs.exists(clangxx_bin1)) {
@@ -394,9 +392,9 @@ export async function kitIfCompiler(bin: string, pr?: ProgressReporter): Promise
             // Names like clang++-13
             clangCompilers.CXX = clangxx_bin1;
         } else {
-            const fname2 = clang_cl_res ? fname.replace(/clang\-cl(-\d+(\.\d+(\.\d+)?)?)/, 'clang-cl') : fname.replace(/clang(-\d+(\.\d+(\.\d+)?)?)/, 'clang');
+            const fname2 = fname.replace(/clang(-\d+(\.\d+(\.\d+)?)?)/, 'clang');
             const bin2 = path.join(path.dirname(bin), fname2);
-            const clangxx_fname2 = clang_cl_res ? fname : fname2.replace(/clang/, 'clang++');
+            const clangxx_fname2 = fname2.replace(/clang/, 'clang++');
             const clangxx_bin2 = path.join(path.dirname(bin), clangxx_fname2);
             // Ensure the version is match
             const version2 = await fs.exists(bin2) ? await getCompilerVersion('Clang', bin2, pr) : null;
@@ -418,7 +416,7 @@ export async function kitIfCompiler(bin: string, pr?: ProgressReporter): Promise
             }
         }
         return {
-            name: clang_cl_res ? version.detectedName.replace(/^Clang/, 'Clang-cl') : version.detectedName,
+            name: version.detectedName,
             compilers: clangCompilers
         };
     } else {
@@ -759,11 +757,11 @@ export async function scanForVSKits(pr?: ProgressReporter): Promise<Kit[]> {
     return ([] as Kit[]).concat(...vs_kits);
 }
 
-async function scanDirForClangForMSVCKits(dir: string, vsInstalls: VSInstallation[], cmakeProject?: CMakeProject): Promise<Kit[]> {
+async function scanDirForClangForMSVCKits(dir: string, vsInstalls: VSInstallation[], cmakeTools?: CMakeTools): Promise<Kit[]> {
     const kits = await scanDirectory(dir, async (binPath): Promise<Kit[] | null> => {
-        const isClangGnuCli = (path.basename(binPath, '.exe') === 'clang');
-        const isClangMsvcCli = (path.basename(binPath, '.exe') === 'clang-cl');
-        if (!isClangGnuCli && !isClangMsvcCli) {
+        const isClangGNUCLI = (path.basename(binPath, '.exe') === 'clang');
+        const isClangCL = (path.basename(binPath, '.exe') === 'clang-cl');
+        if (!isClangGNUCLI && !isClangCL) {
             return null;
         }
 
@@ -775,12 +773,12 @@ async function scanDirForClangForMSVCKits(dir: string, vsInstalls: VSInstallatio
         let clang_cli = '(MSVC CLI)';
 
         // Clang for MSVC ABI with GNU CLI (command line interface) is supported in CMake 3.15.0+
-        if (isClangGnuCli) {
-            if (undefined === cmakeProject) {
-                log.info(localize("failed.to.scan.for.kits", "Unable to scan for GNU CLI Clang kits: cmakeProject is undefined"));
+        if (isClangGNUCLI) {
+            if (undefined === cmakeTools) {
+                log.info(localize("failed.to.scan.for.kits", "Unable to scan for GNU CLI Clang kits: cmakeTools is undefined"));
                 return null;
             } else {
-                const cmake_executable = await cmakeProject.getCMakeExecutable();
+                const cmake_executable = await cmakeTools.getCMakeExecutable();
                 if (undefined === cmake_executable.version) {
                     return null;
                 } else {
@@ -798,56 +796,29 @@ async function scanDirForClangForMSVCKits(dir: string, vsInstalls: VSInstallatio
         for (const vs of vsInstalls) {
             const install_name = vsDisplayName(vs);
             const vs_arch = (version.target && version.target.triple.includes('i686-pc')) ? 'x86' : 'amd64';
+
             const clangArch = (vs_arch === "amd64") ? "x64\\" : "";
-            const clangKitName: string = `Clang ${version.version} ${clang_cli} for MSVC ${vs.installationVersion} (${install_name} - ${vs_arch})`;
-            const clangExists = async () => {
-                const exists = binPath.startsWith(`${vs.installationPath}\\VC\\Tools\\Llvm\\${clangArch}bin`) && await util.checkFileExists(util.lightNormalizePath(binPath));
-                return exists;
-            };
-            if (isClangGnuCli) {
-                if (await clangExists()) {
-                    clangKits.push({
-                        name: clangKitName,
-                        visualStudio: kitVSName(vs),
-                        visualStudioArchitecture: vs_arch,
-                        compilers: {
-                            C: binPath,
-                            CXX: binPath
-                        }
-                    });
-                }
-            } else {
-                const installationVersion = /^(\d+)+./.exec(vs.installationVersion);
-                const generatorName: string | undefined = installationVersion ? VsGenerators[installationVersion[1]] : undefined;
-                if (generatorName) {
-                    if (await clangExists()) {
-                        clangKits.push({
-                            name: clangKitName,
-                            visualStudio: kitVSName(vs),
-                            visualStudioArchitecture: vs_arch,
-                            preferredGenerator: {
-                                name: generatorName,
-                                platform: generatorPlatformFromVSArch[vs_arch] as string || vs_arch,
-                                toolset: `host=${vs_arch}`
-                            },
-                            compilers: {
-                                C: binPath,
-                                CXX: binPath
-                            }
-                        });
+            const clangKitName = `Clang ${version.version} ${clang_cli} for MSVC ${vs.installationVersion} (${install_name} - ${vs_arch})`;
+            if (binPath.startsWith(`${vs.installationPath}\\VC\\Tools\\Llvm\\${clangArch}bin`) && await util.checkFileExists(util.lightNormalizePath(binPath))) {
+                clangKits.push({
+                    name: clangKitName,
+                    visualStudio: kitVSName(vs),
+                    visualStudioArchitecture: vs_arch,
+                    compilers: {
+                        C: binPath,
+                        CXX: binPath
                     }
-                }
+                });
             }
         }
-
         return clangKits;
     });
     return ([] as Kit[]).concat(...kits);
 }
 
-export async function scanForClangForMSVCKits(searchPaths: string[], cmakeProject?: CMakeProject): Promise<Promise<Kit[]>[]> {
+export async function scanForClangForMSVCKits(searchPaths: string[], cmakeTools?: CMakeTools): Promise<Promise<Kit[]>[]> {
     const vs_installs = await vsInstallations();
-    const results = searchPaths.map(p => scanDirForClangForMSVCKits(p, vs_installs, cmakeProject));
+    const results = searchPaths.map(p => scanDirForClangForMSVCKits(p, vs_installs, cmakeTools));
     return results;
 }
 
@@ -915,9 +886,9 @@ export async function effectiveKitEnvironment(kit: Kit, opts?: expand.ExpansionO
             if (cCompiler) {
                 path_list.push(path.dirname(cCompiler));
             }
-            const mingwPath = env['CMT_MINGW_PATH'];
-            if (mingwPath) {
-                path_list.push(mingwPath);
+            const cmt_mingw_path = env['CMT_MINGW_PATH'];
+            if (cmt_mingw_path) {
+                path_list.push(cmt_mingw_path);
             }
             if (env.hasOwnProperty('PATH')) {
                 path_list.unshift(env['PATH'] ?? '');
@@ -964,7 +935,7 @@ export interface KitScanOptions {
  * Search for Kits available on the platform.
  * @returns A list of Kits.
  */
-export async function scanForKits(cmakeProject?: CMakeProject, opt?: KitScanOptions) {
+export async function scanForKits(cmakeTools?: CMakeTools, opt?: KitScanOptions) {
     const kit_options = opt || {};
 
     log.debug(localize('scanning.for.kits.on.system', 'Scanning for Kits on system'));
@@ -1040,7 +1011,7 @@ export async function scanForKits(cmakeProject?: CMakeProject, opt?: KitScanOpti
             // Scan for kits
             const vs_kits = scanForVSKits(pr);
             kit_promises.push(vs_kits);
-            const clang_kits = await scanForClangForMSVCKits(Array.from(clang_paths), cmakeProject);
+            const clang_kits = await scanForClangForMSVCKits(Array.from(clang_paths), cmakeTools);
             kit_promises = kit_promises.concat(clang_kits);
         }
 
@@ -1053,15 +1024,15 @@ export async function scanForKits(cmakeProject?: CMakeProject, opt?: KitScanOpti
 }
 
 // Rescan if the kits versions (extension context state var versus value defined for this release) don't match.
-export async function scanForKitsIfNeeded(cmakeProject: CMakeProject): Promise<boolean> {
-    const kitsVersionSaved = cmakeProject.extensionContext.globalState.get<number>('kitsVersionSaved');
+export async function scanForKitsIfNeeded(cmt: CMakeTools): Promise<boolean> {
+    const kitsVersionSaved = cmt.extensionContext.globalState.get<number>('kitsVersionSaved');
     const kitsVersionCurrent = 2;
 
     // Scan also when there is no kits version saved in the state.
     if ((!kitsVersionSaved || kitsVersionSaved !== kitsVersionCurrent) && !util.isTestMode() && !kitsController.KitsController.isScanningForKits()) {
         log.info(localize('silent.kits.rescan', 'Detected kits definition version change from {0} to {1}. Silently scanning for kits.', kitsVersionSaved, kitsVersionCurrent));
-        await kitsController.KitsController.scanForKits(cmakeProject);
-        await cmakeProject.extensionContext.globalState.update('kitsVersionSaved', kitsVersionCurrent);
+        await kitsController.KitsController.scanForKits(cmt);
+        await cmt.extensionContext.globalState.update('kitsVersionSaved', kitsVersionCurrent);
         return true;
     }
 
@@ -1108,44 +1079,12 @@ export async function descriptionForKit(kit: Kit, shortVsName: boolean = false):
     return localize('unspecified.let.cmake.guess', 'Unspecified (Let CMake guess what compilers and environment to use)');
 }
 
-export async function readKitsFile(filePath: string, workspaceFolder?: string, expansionOptions?: expand.ExpansionOptions): Promise<Kit[]> {
-    const fileStats = await fs.tryStat(filePath);
-    if (!fileStats) {
-        log.debug(localize('not.reading.nonexistent.kit', 'Not reading non-existent kits file: {0}', filePath));
-        return [];
-    }
-    if (!fileStats.isFile()) {
-        log.debug(localize('not.reading.invalid.path', 'Not reading invalid kits file: {0}', filePath));
-        return [];
-    }
-    log.debug(localize('reading.kits.file', 'Reading kits file {0}', filePath));
-    const content_str = await fs.readFile(filePath);
-    let kits_raw: object[] = [];
-    try {
-        kits_raw = json5.parse(content_str.toLocaleString());
-    } catch (e) {
-        log.error(localize('failed.to.parse', 'Failed to parse {0}: {1}', path.basename(filePath), util.errorToString(e)));
-        return [];
-    }
-    const validator = await loadSchema('schemas/kits-schema.json');
-    const is_valid = validator(kits_raw);
-    if (!is_valid) {
-        const errors = validator.errors!;
-        log.error(localize('invalid.file.error', 'Invalid kit contents {0} ({1}):', path.basename(filePath), filePath));
-        for (const err of errors) {
-            log.error(` >> ${err.dataPath}: ${err.message}`);
-        }
-        return [];
-    }
-    const kits = kits_raw as Kit[];
-    log.info(localize('successfully.loaded.kits', 'Successfully loaded {0} kits from {1}', kits.length, filePath));
-
-    const expandedKits: Kit[] = [];
-    if (!expansionOptions) {
-        expansionOptions = {
+async function expandKitVariables(kit: Kit): Promise<Kit> {
+    if (kit.toolchainFile) {
+        kit.toolchainFile = await expand.expandString(kit.toolchainFile, {
             vars: {
-                buildKit: '${buildKit}',
-                buildType: '${buildType}',
+                buildKit: kit.name,
+                buildType: '${buildType}',  // Unsupported variable substitutions use identity.
                 buildKitVendor: '${buildKitVendor}',
                 buildKitTriple: '${buildKitTriple}',
                 buildKitVersion: '${buildKitVersion}',
@@ -1156,27 +1095,49 @@ export async function readKitsFile(filePath: string, workspaceFolder?: string, e
                 buildKitVersionMinor: '${buildKitVersionMinor}',
                 generator: '${generator}',
                 userHome: paths.userHome,
-                workspaceFolder: workspaceFolder ? workspaceFolder : '${workspaceFolder}',
-                workspaceFolderBasename: workspaceFolder ? path.basename(workspaceFolder) : '${workspaceFolderBasename}',
+                workspaceFolder: '${workspaceFolder}',
+                workspaceFolderBasename: '${workspaceFolderBasename}',
                 workspaceHash: '${workspaceHash}',
-                workspaceRoot: workspaceFolder ? workspaceFolder : '${workspaceRoot}',
-                workspaceRootFolderName: workspaceFolder ? path.basename(workspaceFolder) : '${workspaceRootFolderName}'
+                workspaceRoot: '${workspaceRoot}',
+                workspaceRootFolderName: '${workspaceRootFolderName}'
             }
-        };
+        });
     }
-    for (const kit of dropNulls(kits)) {
-        expansionOptions.vars.buildKit = kit.name;
-        if (kit.toolchainFile) {
-            kit.toolchainFile = await expand.expandString(kit.toolchainFile, expansionOptions);
-        }
-        if (kit.compilers) {
-            for (const lang in kit.compilers) {
-                kit.compilers[lang] = await expand.expandString(kit.compilers[lang], expansionOptions);
-            }
-        }
-        expandedKits.push(kit);
+    return kit;
+}
+
+export async function readKitsFile(filepath: string): Promise<Kit[]> {
+    const fileStats = await fs.tryStat(filepath);
+    if (!fileStats) {
+        log.debug(localize('not.reading.nonexistent.kit', 'Not reading non-existent kits file: {0}', filepath));
+        return [];
     }
-    return expandedKits;
+    if (!fileStats.isFile()) {
+        log.debug(localize('not.reading.invalid.path', 'Not reading invalid kits file: {0}', filepath));
+        return [];
+    }
+    log.debug(localize('reading.kits.file', 'Reading kits file {0}', filepath));
+    const content_str = await fs.readFile(filepath);
+    let kits_raw: object[] = [];
+    try {
+        kits_raw = json5.parse(content_str.toLocaleString());
+    } catch (e) {
+        log.error(localize('failed.to.parse', 'Failed to parse {0}: {1}', path.basename(filepath), util.errorToString(e)));
+        return [];
+    }
+    const validator = await loadSchema('schemas/kits-schema.json');
+    const is_valid = validator(kits_raw);
+    if (!is_valid) {
+        const errors = validator.errors!;
+        log.error(localize('invalid.file.error', 'Invalid kit contents {0} ({1}):', path.basename(filepath), filepath));
+        for (const err of errors) {
+            log.error(` >> ${err.dataPath}: ${err.message}`);
+        }
+        return [];
+    }
+    const kits = kits_raw as Kit[];
+    log.info(localize('successfully.loaded.kits', 'Successfully loaded {0} kits from {1}', kits.length, filepath));
+    return Promise.all(dropNulls(kits).map(expandKitVariables));
 }
 
 function convertMingwDirsToSearchPaths(mingwDirs: string[]): string[] {
@@ -1201,24 +1162,23 @@ export function kitsPathForWorkspaceFolder(ws: vscode.WorkspaceFolder): string {
 
 /**
  * Get the kits declared for the given workspace directory. Looks in `.vscode/cmake-kits.json`.
- * @param workspaceFolder The path to a VSCode workspace directory
+ * @param dirPath The path to a VSCode workspace directory
  */
-export function kitsForWorkspaceDirectory(workspaceFolder: string): Promise<Kit[]> {
-    const ws_kits_file = path.join(workspaceFolder, '.vscode/cmake-kits.json');
-    return readKitsFile(ws_kits_file, workspaceFolder);
+export function kitsForWorkspaceDirectory(dirPath: string): Promise<Kit[]> {
+    const ws_kits_file = path.join(dirPath, '.vscode/cmake-kits.json');
+    return readKitsFile(ws_kits_file);
 }
 
 /**
  * Get the kits defined by the user in the files pointed by "cmake.additionalKits".
  */
-export async function getAdditionalKits(cmakeProject: CMakeProject): Promise<Kit[]> {
-    const opts: expand.ExpansionOptions = await cmakeProject.getExpansionOptions();
-    const expandedAdditionalKitFiles: string[] = await cmakeProject.getExpandedAdditionalKitFiles();
-
+export async function getAdditionalKits(cmakeTools: CMakeTools): Promise<Kit[]> {
+    const additionalKitFiles = await kitsController.KitsController.expandAdditionalKitFiles(cmakeTools);
     let additionalKits: Kit[] = [];
-    for (const kitFile of expandedAdditionalKitFiles) {
-        additionalKits = additionalKits.concat(await readKitsFile(kitFile, cmakeProject.workspaceContext.folder.uri.fsPath, opts));
+    for (const kitFile of additionalKitFiles) {
+        additionalKits = additionalKits.concat(await readKitsFile(kitFile));
     }
+
     return additionalKits;
 }
 

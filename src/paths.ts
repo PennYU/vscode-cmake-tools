@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as which from 'which';
 import * as vscode from 'vscode';
 
-import { vsInstallations } from './installs/visualStudio';
+import { vsInstallations } from './installs/visual-studio';
 import { expandString } from './expand';
 import { fs } from './pr';
 import * as util from '@cmt/util';
@@ -99,9 +99,6 @@ class Paths {
      * application data should be stored.
      */
     get userLocalDir(): string {
-        if (util.isTestMode()) {
-            return path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, '.vscode');
-        }
         if (process.platform === 'win32') {
             return this.windows.LocalAppData!;
         } else {
@@ -172,7 +169,7 @@ class Paths {
     }
 
     async getCTestPath(wsc: DirectoryContext, overWriteCMakePathSetting?: string): Promise<string | null> {
-        const ctest_path = await this.expandStringPath(wsc.config.rawCTestPath, wsc);
+        const ctest_path = await this.expandStringPath(wsc.config.raw_ctestPath, wsc);
         if (!ctest_path || ctest_path === 'auto') {
             const cmake = await this.getCMakePath(wsc, overWriteCMakePathSetting);
             if (cmake === null) {
@@ -203,7 +200,7 @@ class Paths {
 
         let raw = overWriteCMakePathSetting;
         if (!raw) {
-            raw = await this.expandStringPath(wsc.config.rawCMakePath, wsc);
+            raw = await this.expandStringPath(wsc.config.raw_cmakePath, wsc);
         }
 
         if (raw === 'auto' || raw === 'cmake') {
@@ -242,23 +239,23 @@ class Paths {
     async expandStringPath(raw_path: string, wsc: DirectoryContext): Promise<string> {
         return expandString(raw_path, {
             vars: {
-                buildKit: '${buildKit}',
-                buildType: '${buildType}',
-                buildKitVendor: '${buildKitVendor}',
-                buildKitTriple: '${buildKitTriple}',
-                buildKitVersion: '${buildKitVersion}',
-                buildKitHostOs: '${buildKitVendor}',
-                buildKitTargetOs: '${buildKitTargetOs}',
-                buildKitTargetArch: '${buildKitTargetArch}',
-                buildKitVersionMajor: '${buildKitVersionMajor}',
-                buildKitVersionMinor: '${buildKitVersionMinor}',
-                generator: '${generator}',
-                userHome: this.userHome,
+                buildKit: '',
+                buildKitVendor: '',
+                buildKitTriple: '',
+                buildKitVersion: '',
+                buildKitHostOs: '',
+                buildKitTargetOs: '',
+                buildKitTargetArch: '',
+                buildKitVersionMajor: '',
+                buildKitVersionMinor: '',
+                buildType: '',
+                generator: '',
                 workspaceFolder: wsc.folder.uri.fsPath,
                 workspaceFolderBasename: path.basename(wsc.folder.uri.fsPath),
-                workspaceHash: util.makeHashString(wsc.folder.uri.fsPath),
                 workspaceRoot: wsc.folder.uri.fsPath,
-                workspaceRootFolderName: path.basename(wsc.folder.uri.fsPath)
+                workspaceRootFolderName: path.basename(wsc.folder.uri.fsPath),
+                workspaceHash: util.makeHashString(wsc.folder.uri.fsPath),
+                userHome: this.userHome
             }
         });
     }

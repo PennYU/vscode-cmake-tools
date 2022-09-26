@@ -1,20 +1,20 @@
 /* eslint-disable no-unused-expressions */
 import * as api from '@cmt/api';
 import { CMakeCache } from '@cmt/cache';
-import { CMakeProject, ConfigureTrigger } from '@cmt/cmakeProject';
+import { CMakeTools, ConfigureTrigger } from '@cmt/cmakeTools';
 import { readKitsFile, kitsForWorkspaceDirectory, getAdditionalKits, USER_KITS_FILEPATH } from '@cmt/kit';
 import { platformNormalizePath } from '@cmt/util';
 import { DefaultEnvironment, expect } from '@test/util';
 
 suite('Toolchain Substitution', () => {
-    let cmakeProject: CMakeProject;
+    let cmt: CMakeTools;
     let testEnv: DefaultEnvironment;
 
     setup(async function (this: Mocha.Context) {
         this.timeout(100000);
 
         testEnv = new DefaultEnvironment('test/extension-tests/successful-build/project-folder', 'build', 'output.txt');
-        cmakeProject = await CMakeProject.create(testEnv.vsContext, testEnv.wsContext);
+        cmt = await CMakeTools.create(testEnv.vsContext, testEnv.wsContext);
 
         const user_kits = await readKitsFile(USER_KITS_FILEPATH);
         const ws_kits = await kitsForWorkspaceDirectory(testEnv.projectFolder.location);
@@ -23,7 +23,7 @@ suite('Toolchain Substitution', () => {
         expect(tc_kit).to.not.eq(undefined);
 
         // Test additional user kits
-        const add_kits = await getAdditionalKits(cmakeProject);
+        const add_kits = await getAdditionalKits(cmt);
         expect(add_kits.length).to.be.eq(4);
         const additionalKitNames = add_kits.map(k => k.name);
         expect(additionalKitNames).to.deep.eq([
@@ -35,22 +35,22 @@ suite('Toolchain Substitution', () => {
 
         // Set preferred generators
         testEnv.config.updatePartial({ preferredGenerators: ['Unix Makefiles'] });
-        await cmakeProject.setKit(tc_kit!);
+        await cmt.setKit(tc_kit!);
 
         testEnv.projectFolder.buildDirectory.clear();
     });
 
     teardown(async function (this: Mocha.Context) {
         this.timeout(30000);
-        await cmakeProject.asyncDispose();
+        await cmt.asyncDispose();
         testEnv.teardown();
     });
 
     test('Check substitution within toolchain kits', async () => {
         // Configure
-        expect(await cmakeProject.configureInternal(ConfigureTrigger.runTests)).to.be.eq(0, '[toolchain] configure failed');
+        expect(await cmt.configureInternal(ConfigureTrigger.runTests)).to.be.eq(0, '[toolchain] configure failed');
         expect(testEnv.projectFolder.buildDirectory.isCMakeCachePresent).to.eql(true, 'expected cache not present');
-        const cache = await CMakeCache.fromPath(await cmakeProject.cachePath);
+        const cache = await CMakeCache.fromPath(await cmt.cachePath);
 
         const cacheEntry = cache.get('CMAKE_TOOLCHAIN_FILE') as api.CacheEntry;
         expect(cacheEntry).to.not.be.null;

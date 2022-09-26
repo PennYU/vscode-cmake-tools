@@ -10,7 +10,7 @@ import * as kit from '../../src/kit';
 import * as triple from '../../src/triple';
 import { fs } from '../../src/pr';
 
-import { CMakeProject } from '@cmt/cmakeProject';
+import { CMakeTools } from '@cmt/cmakeTools';
 import { clearExistingKitConfigurationFile, DefaultEnvironment } from '@test/util';
 
 const here = __dirname;
@@ -27,7 +27,7 @@ function getPathWithoutCompilers() {
 }
 
 suite('Kits scan test', () => {
-    let cmakeProject: CMakeProject;
+    let cmt: CMakeTools;
     let testEnv: DefaultEnvironment;
 
     const fakebin = getTestRootFilePath('fakebin');
@@ -89,12 +89,12 @@ suite('Kits scan test', () => {
         const exe_res = 'output.txt';
 
         testEnv = new DefaultEnvironment('test/extension-tests/successful-build/project-folder', build_loc, exe_res);
-        cmakeProject = await CMakeProject.create(testEnv.vsContext, testEnv.wsContext);
+        cmt = await CMakeTools.create(testEnv.vsContext, testEnv.wsContext);
 
         await clearExistingKitConfigurationFile();
 
         // Don't care about the result, just check that we don't throw during the test
-        await kit.scanForKits(cmakeProject, { ignorePath: process.platform === 'win32' });
+        await kit.scanForKits(cmt, { ignorePath: process.platform === 'win32' });
     }).timeout(120000 * 2); // Compiler detection can run a little slow
 
     test('Detect a GCC compiler file', async () => {

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
+import { platform } from 'os';
 
 import { DebuggerEnvironmentVariable, execute } from '@cmt/proc';
 import rollbar from '@cmt/rollbar';
@@ -416,11 +417,11 @@ export function parseCompileDefinition(str: string): [string, string | null] {
 }
 
 export function thisExtension() {
-    const extension = vscode.extensions.getExtension('ms-vscode.cmake-tools');
-    if (!extension) {
-        throw new Error(localize('extension.is.undefined', 'Extension is undefined!'));
+    const ext = vscode.extensions.getExtension('ms-vscode.cmake-tools');
+    if (!ext) {
+        throw new Error(localize('extension.is.null', 'Our own extension is null! What gives?'));
     }
-    return extension;
+    return ext;
 }
 
 export interface PackageJSON {
@@ -600,28 +601,6 @@ export function checkDirectoryExists(filePath: string): Promise<boolean> {
     });
 }
 
-/** Test whether a directory exists */
-export function checkDirectoryExistsSync(dirPath: string): boolean {
-    try {
-        return fs.statSync(dirPath).isDirectory();
-    } catch (e) {
-    }
-    return false;
-}
-
-export function createDirIfNotExistsSync(dirPath: string | undefined): void {
-    if (!dirPath) {
-        return;
-    }
-    if (!checkDirectoryExistsSync(dirPath)) {
-        try {
-            fs.mkdirSync(dirPath, {recursive: true});
-        } catch (e) {
-            console.log(e);
-        }
-    }
-}
-
 // Read the files in a directory.
 export function readDir(dirPath: string): Promise<string[]> {
     return new Promise((resolve) => {
@@ -703,10 +682,6 @@ export function isWorkspaceFolder(x?: any): boolean {
 
 export async function normalizeAndVerifySourceDir(sourceDir: string): Promise<string> {
     let result = lightNormalizePath(sourceDir);
-    if (process.platform === 'win32' && result.length > 1 && result.charCodeAt(0) > 97 && result.charCodeAt(0) <= 122 && result[1] === ':') {
-        // Windows drive letter should be uppercase, for consistency with other tools like Visual Studio.
-        result = result[0].toUpperCase() + result.slice(1);
-    }
     if (path.basename(result).toLocaleLowerCase() === "cmakelists.txt") {
         // Don't fail if CMakeLists.txt was accidentally appended to the sourceDirectory.
         result = path.dirname(result);
@@ -770,7 +745,7 @@ export function isSupportedCompiler(compilerName: string | undefined): string | 
 }
 
 async function getHostSystemName(): Promise<string> {
-    if (process.platform === 'win32') {
+    if (platform() === "win32") {
         return "Windows";
     } else {
         const result = await execute('uname', ['-s']).result;
@@ -810,29 +785,4 @@ export function getCmakeToolsTargetPopulation(): TargetPopulation {
         return TargetPopulation.Public;
     }
     return TargetPopulation.Internal;
-}
-
-/**
- * @brief Schedule a task to be run at some future time. This allows other pending tasks to
- * execute ahead of the scheduled task and provides a form of async behavior for TypeScript.
- */
-export function scheduleTask<T>(task: () => T): Promise<T> {
-    return scheduleAsyncTask(() => {
-        try {
-            return Promise.resolve(task());
-        } catch (e: any) {
-            return Promise.reject(e);
-        }
-    });
-}
-
-/**
- * @brief A version of scheduleTask that supports async tasks as input.
- */
-export async function scheduleAsyncTask<T>(task: () => Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        setImmediate(() => {
-            void task().then(resolve).catch(reject);
-        });
-    });
 }

@@ -123,7 +123,6 @@ export interface ExtensionConfigurationSettings {
     emscriptenSearchDirs: string[];
     mergedCompileCommands: string | null;
     copyCompileCommands: string | null;
-    loadCompileCommands: boolean;
     configureOnOpen: boolean | null;
     configureOnEdit: boolean;
     skipConfigureIfCachePresent: boolean | null;
@@ -156,13 +155,17 @@ type EmittersOf<T> = {
  * in the setting name.
  */
 export class ConfigurationReader implements vscode.Disposable {
-    private updateSubscription?: vscode.Disposable;
+    private _updateSubscription?: vscode.Disposable;
 
-    constructor(private readonly configData: ExtensionConfigurationSettings) {}
+    constructor(private readonly _configData: ExtensionConfigurationSettings) {}
+
+    get configData() {
+        return this._configData;
+    }
 
     dispose() {
-        if (this.updateSubscription) {
-            this.updateSubscription.dispose();
+        if (this._updateSubscription) {
+            this._updateSubscription.dispose();
         }
     }
 
@@ -170,15 +173,15 @@ export class ConfigurationReader implements vscode.Disposable {
      * Get a configuration object relevant to the given workspace directory. This
      * supports multiple workspaces having differing configs.
      *
-     * @param folder A directory to use for the config
+     * @param workspacePath A directory to use for the config
      */
     static create(folder?: vscode.WorkspaceFolder): ConfigurationReader {
-        const configData = ConfigurationReader.loadConfig(folder);
-        const reader = new ConfigurationReader(configData);
-        reader.updateSubscription = vscode.workspace.onDidChangeConfiguration(e => {
+        const data = ConfigurationReader.loadConfig(folder);
+        const reader = new ConfigurationReader(data);
+        reader._updateSubscription = vscode.workspace.onDidChangeConfiguration(e => {
             if (e.affectsConfiguration('cmake', folder?.uri)) {
-                const newConfigData = ConfigurationReader.loadConfig(folder);
-                const updatedKeys = reader.update(newConfigData);
+                const new_data = ConfigurationReader.loadConfig(folder);
+                const updatedKeys = reader.update(new_data);
 
                 if (updatedKeys.length > 0) {
                     const telemetryProperties: telemetry.Properties = {
@@ -193,38 +196,37 @@ export class ConfigurationReader implements vscode.Disposable {
     }
 
     static loadConfig(folder?: vscode.WorkspaceFolder): ExtensionConfigurationSettings {
-        const configData = vscode.workspace.getConfiguration('cmake', folder?.uri) as any as
+        const data = vscode.workspace.getConfiguration('cmake', folder?.uri) as any as
             ExtensionConfigurationSettings;
-        const platformMap = {
+        const platmap = {
             win32: 'windows',
             darwin: 'osx',
             linux: 'linux'
         } as { [k: string]: string };
-        const platform = platformMap[process.platform];
-        const forPlatform = (configData as any)[platform] as ExtensionConfigurationSettings | undefined;
-        return { ...configData, ...(forPlatform || {}) };
+        const platform = platmap[process.platform];
+        const for_platform = (data as any)[platform] as ExtensionConfigurationSettings | undefined;
+        return { ...data, ...(for_platform || {}) };
     }
 
-    update(newConfigData: ExtensionConfigurationSettings): string[] {
-        return this.updatePartial(newConfigData);
+    update(newData: ExtensionConfigurationSettings): string[] {
+        return this.updatePartial(newData);
     }
-
-    updatePartial(newConfigData: Partial<ExtensionConfigurationSettings>, fireEvent: boolean = true): string[] {
+    updatePartial(newData: Partial<ExtensionConfigurationSettings>, fireEvent: boolean = true): string[] {
         const keys: string[] = [];
-        const oldValues = { ...this.configData };
-        Object.assign(this.configData, newConfigData);
-        for (const keyObject of Object.getOwnPropertyNames(newConfigData)) {
-            const key = keyObject as keyof ExtensionConfigurationSettings;
-            if (!(key in this.emitters)) {
+        const old_values = { ...this.configData };
+        Object.assign(this.configData, newData);
+        for (const key_ of Object.getOwnPropertyNames(newData)) {
+            const key = key_ as keyof ExtensionConfigurationSettings;
+            if (!(key in this._emitters)) {
                 continue;  // Extension config we load has some additional properties we don't care about.
             }
-            const newValue = this.configData[key];
-            const oldValue = oldValues[key];
-            if (util.compare(newValue, oldValue) !== util.Ordering.Equivalent) {
+            const new_value = this.configData[key];
+            const old_value = old_values[key];
+            if (util.compare(new_value, old_value) !== util.Ordering.Equivalent) {
                 if (fireEvent) {
-                    const em: vscode.EventEmitter<ExtensionConfigurationSettings[typeof key]> = this.emitters[key];
+                    const em: vscode.EventEmitter<ExtensionConfigurationSettings[typeof key]> = this._emitters[key];
                     // The key is defined by this point.
-                    const temp = newConfigData[key];
+                    const temp = newData[key];
                     if (temp !== undefined) {
                         em.fire(temp);
                     }
@@ -287,7 +289,7 @@ export class ConfigurationReader implements vscode.Disposable {
     get parallelJobs(): number | undefined {
         return this.configData.parallelJobs;
     }
-    get ctestParallelJobs(): number | null {
+    get ctest_parallelJobs(): number | null {
         return this.configData.ctest.parallelJobs;
     }
     get parseBuildDiagnostics(): boolean {
@@ -296,10 +298,10 @@ export class ConfigurationReader implements vscode.Disposable {
     get enableOutputParsers(): string[] | null {
         return this.configData.enabledOutputParsers;
     }
-    get rawCMakePath(): string {
+    get raw_cmakePath(): string {
         return this.configData.cmakePath;
     }
-    get rawCTestPath(): string {
+    get raw_ctestPath(): string {
         return this.configData.ctestPath;
     }
     get debugConfig(): CppDebugConfiguration {
@@ -376,11 +378,11 @@ export class ConfigurationReader implements vscode.Disposable {
     }
 
     get numCTestJobs(): number {
-        const ctestJobs = this.ctestParallelJobs;
-        if (!ctestJobs) {
+        const ctest_jobs = this.ctest_parallelJobs;
+        if (!ctest_jobs) {
             return this.numJobs || defaultNumJobs();
         }
-        return ctestJobs;
+        return ctest_jobs;
     }
 
     get mingwSearchDirs(): string[] {
@@ -397,9 +399,6 @@ export class ConfigurationReader implements vscode.Disposable {
     }
     get copyCompileCommands(): string | null {
         return this.configData.copyCompileCommands;
-    }
-    get loadCompileCommands(): boolean {
-        return this.configData.loadCompileCommands;
     }
     get showSystemKits(): boolean {
         return this.configData.showSystemKits;
@@ -428,14 +427,14 @@ export class ConfigurationReader implements vscode.Disposable {
         return this.configData.touchbar;
     }
     get statusbar() {
-        return this.configData.statusbar;
+        return this._configData.statusbar;
     }
 
     get launchBehavior(): string {
         return this.configData.launchBehavior;
     }
 
-    private readonly emitters: EmittersOf<ExtensionConfigurationSettings> = {
+    private readonly _emitters: EmittersOf<ExtensionConfigurationSettings> = {
         autoSelectActiveFolder: new vscode.EventEmitter<boolean>(),
         cmakePath: new vscode.EventEmitter<string>(),
         buildDirectory: new vscode.EventEmitter<string>(),
@@ -470,7 +469,6 @@ export class ConfigurationReader implements vscode.Disposable {
         emscriptenSearchDirs: new vscode.EventEmitter<string[]>(),
         mergedCompileCommands: new vscode.EventEmitter<string | null>(),
         copyCompileCommands: new vscode.EventEmitter<string | null>(),
-        loadCompileCommands: new vscode.EventEmitter<boolean>(),
         configureOnOpen: new vscode.EventEmitter<boolean | null>(),
         configureOnEdit: new vscode.EventEmitter<boolean>(),
         skipConfigureIfCachePresent: new vscode.EventEmitter<boolean | null>(),
@@ -499,47 +497,7 @@ export class ConfigurationReader implements vscode.Disposable {
     onChange<K extends keyof ExtensionConfigurationSettings>(setting: K, cb: (value: ExtensionConfigurationSettings[K]) => any): vscode.Disposable {
         // Can't use vscode.EventEmitter<ExtensionConfigurationSettings[K]> here, potentially because K and keyof ExtensionConfigurationSettings
         // may not be the same...
-        const emitter: vscode.EventEmitter<any> = this.emitters[setting];
-        const awaitableCallback = (value: ExtensionConfigurationSettings[K]) => {
-            activeChangeEvents.scheduleAndTrackTask(() => cb(value));
-        };
-        return emitter.event(awaitableCallback);
+        const emitter: vscode.EventEmitter<any> = this._emitters[setting];
+        return emitter.event(cb);
     }
-
-    getSettingsChangePromise() {
-        return activeChangeEvents.getAwaiter();
-    }
-}
-
-/**
- * Tracks work that is done as a result of a settings change.
- */
-class PromiseTracker {
-    private promises: Set<any> = new Set();
-
-    constructor() {
-    }
-
-    public scheduleAndTrackTask(cb: () => any): void {
-        const selfDestructWrapper = util.scheduleTask(() => {
-            const result = cb();
-            return result;
-        }).then(() => {
-            this.promises.delete(selfDestructWrapper);
-        });
-        this.promises.add(selfDestructWrapper);
-    }
-
-    public getAwaiter(): Promise<any[]> {
-        return Promise.all(this.promises);
-    }
-}
-
-const activeChangeEvents: PromiseTracker = new PromiseTracker();
-
-/**
- * Get a promise that will resolve when the current set of settings change handlers have completed.
- */
-export function getSettingsChangePromise(): Promise<any[]> {
-    return activeChangeEvents.getAwaiter();
 }
