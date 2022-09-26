@@ -7,7 +7,7 @@ import * as logging from '@cmt/logging';
 import { execute } from '@cmt/proc';
 import { expandString, ExpansionOptions } from '@cmt/expand';
 import paths from '@cmt/paths';
-import { compareVersions, VSInstallation, vsInstallations, enumerateMsvcToolsets, varsForVSInstallation, getVcVarsBatScript } from '@cmt/installs/visual-studio';
+import { compareVersions, VSInstallation, vsInstallations, enumerateMsvcToolsets, varsForVSInstallation, getVcVarsBatScript } from '@cmt/installs/visualStudio';
 import { EnvironmentUtils, EnvironmentWithNull } from './environmentVariables';
 
 nls.config({ messageFormat: nls.MessageFormat.bundle, bundleFormat: nls.BundleFormat.standalone })();
@@ -172,7 +172,7 @@ function evaluateInheritedPresetConditions(preset: Preset, allPresets: Preset[],
         } else if (util.isArrayOfString(preset.inherits)) {
             return preset.inherits.every(parentName => evaluateParent(parentName));
         }
-        log.error(localize('invalid.inherits.type', 'Preset {0}: Invalid value for inherits {1}', preset.name, `"${preset.inherits}"`));
+        log.error(localize('invalid.inherits.type', 'Preset {0}: Invalid value for {1}', preset.name, `\"inherits\": "${preset.inherits}"`));
         return false;
     }
     return true;
@@ -366,14 +366,6 @@ export function setOriginalPresetsFile(folder: string, presets: PresetsFile | un
 
 export function setOriginalUserPresetsFile(folder: string, presets: PresetsFile | undefined) {
     originalUserPresetsFiles.set(folder, presets);
-}
-
-export function getPresetsFile(folder: string) {
-    return presetsFiles.get(folder);
-}
-
-export function getUserPresetsFile(folder: string) {
-    return userPresetsFiles.get(folder);
 }
 
 export function setPresetsFile(folder: string, presets: PresetsFile | undefined) {
@@ -601,7 +593,7 @@ async function getExpansionOptions(workspaceFolder: string, sourceDir: string, p
     return expansionOpts;
 }
 
-async function expandCondition(condition: boolean | Condition | null | undefined, expansionOpts: ExpansionOptions) {
+async function expandCondition(condition: boolean | Condition | null | undefined, expansionOpts: ExpansionOptions): Promise<boolean | Condition | undefined> {
     if (util.isNullOrUndefined(condition)) {
         return undefined;
     }
@@ -647,21 +639,21 @@ async function expandCondition(condition: boolean | Condition | null | undefined
 }
 
 export async function expandConditionsForPresets(folder: string, sourceDir: string) {
-    for (const preset of configurePresets(folder)) {
-        const opts = await getExpansionOptions('${workspaceFolder}', sourceDir, preset);
+    for (const preset of allConfigurePresets(folder)) {
         if (preset.condition) {
+            const opts = await getExpansionOptions('${workspaceFolder}', sourceDir, preset);
             preset.condition = await expandCondition(preset.condition, opts);
         }
     }
-    for (const preset of buildPresets(folder)) {
-        const opts = await getExpansionOptions('${workspaceFolder}', sourceDir, preset);
+    for (const preset of allBuildPresets(folder)) {
         if (preset.condition) {
+            const opts = await getExpansionOptions('${workspaceFolder}', sourceDir, preset);
             preset.condition = await expandCondition(preset.condition, opts);
         }
     }
-    for (const preset of testPresets(folder)) {
-        const opts = await getExpansionOptions('${workspaceFolder}', sourceDir, preset);
+    for (const preset of allTestPresets(folder)) {
         if (preset.condition) {
+            const opts = await getExpansionOptions('${workspaceFolder}', sourceDir, preset);
             preset.condition = await expandCondition(preset.condition, opts);
         }
     }
@@ -983,8 +975,8 @@ async function expandConfigurePresetHelper(folder: string, preset: ConfigurePres
 
                             if (!vsInstall) {
                                 log.warning(localize('specified.vs.not.found',
-                                    "Configure preset {0}: Visual Studio instance specified by CMAKE_GENERATOR_INSTANCE={1} was not found, falling back on default instance lookup behavior.",
-                                    preset.name, `"${cmakeGeneratorInstance}"`));
+                                    "Configure preset {0}: Visual Studio instance specified by {1} was not found, falling back on default instance lookup behavior.",
+                                    preset.name, `CMAKE_GENERATOR_INSTANCE="${cmakeGeneratorInstance}"`));
                             }
                         }
                     }
@@ -1655,5 +1647,13 @@ export function configurePresetChangeNeedsClean(newPreset: ConfigurePreset, oldP
         return true;
     } else {
         return false;
+    }
+}
+
+export function getValue(value: string | ValueStrategy): string | undefined {
+    if (util.isString(value)) {
+        return value;
+    } else if (value.strategy === 'set') {
+        return value.value;
     }
 }

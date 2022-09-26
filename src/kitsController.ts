@@ -1,12 +1,11 @@
 'use strict';
 
 import * as chokidar from 'chokidar';
-import * as expand from './expand';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import * as nls from 'vscode-nls';
 
-import CMakeTools from '@cmt/cmakeTools';
+import CMakeProject from '@cmt/cmakeProject';
 import {
     Kit,
     descriptionForKit,
@@ -57,54 +56,21 @@ export class KitsController {
     folderKits: Kit[] = [];
     additionalKits: Kit[] = [];
 
-    private constructor(readonly cmakeTools: CMakeTools, private readonly _kitsWatcher: chokidar.FSWatcher) {}
+    private constructor(readonly cmakeProject: CMakeProject, private readonly _kitsWatcher: chokidar.FSWatcher) {}
 
-    static async expandAdditionalKitFiles(cmakeTools: CMakeTools): Promise<string[]> {
-        const additionalKitFiles: string[] = cmakeTools.workspaceContext.config.additionalKits;
-
-        const opts: expand.ExpansionOptions = {
-            vars: {
-                buildKit: cmakeTools.activeKit?.name || "",
-                buildType: await cmakeTools.currentBuildType() || "",
-                buildKitVendor: "",
-                buildKitTriple: "",
-                buildKitVersion: "",
-                buildKitHostOs: "",
-                buildKitTargetOs: "",
-                buildKitTargetArch: "",
-                buildKitVersionMajor: "",
-                buildKitVersionMinor: "",
-                generator: "",
-                userHome: paths.userHome,
-                workspaceFolder: cmakeTools.workspaceContext.folder.uri.fsPath,
-                workspaceFolderBasename: path.basename(cmakeTools.workspaceContext.folder.uri.fsPath),
-                workspaceHash: "",
-                workspaceRoot: cmakeTools.workspaceContext.folder.uri.fsPath,
-                workspaceRootFolderName: path.basename(cmakeTools.workspaceContext.folder.uri.fsPath)
-            }
-        };
-
-        const expandedAdditionalKitFiles: Promise<string>[] = [];
-        additionalKitFiles.forEach(kitFile => {
-            const expandedKitFile: Promise<string> = expand.expandString(kitFile, opts);
-            expandedAdditionalKitFiles.push(expandedKitFile);
-        });
-
-        return Promise.all(expandedAdditionalKitFiles);
-    }
-
-    static async init(cmakeTools: CMakeTools) {
+    static async init(cmakeProject: CMakeProject) {
         if (KitsController.userKits.length === 0) {
             // never initialized before
-            await KitsController.readUserKits(cmakeTools);
+            await KitsController.readUserKits(cmakeProject);
         }
 
-        const folderKitsFiles: string[] = [KitsController._workspaceKitsPath(cmakeTools.folder)].concat(await KitsController.expandAdditionalKitFiles(cmakeTools));
+        const expandedAdditionalKitFiles: string[] = await cmakeProject.getExpandedAdditionalKitFiles();
+        const folderKitsFiles: string[] = [KitsController._workspaceKitsPath(cmakeProject.folder)].concat(expandedAdditionalKitFiles);
         const kitsWatcher = chokidar.watch(folderKitsFiles, { ignoreInitial: true, followSymlinks: false });
-        const kitsController = new KitsController(cmakeTools, kitsWatcher);
+        const kitsController = new KitsController(cmakeProject, kitsWatcher);
         chokidarOnAnyChange(kitsWatcher, _ => rollbar.takePromise(localize('rereading.kits', 'Re-reading folder kits'), {},
             kitsController.readKits(KitsReadMode.folderKits)));
-        cmakeTools.workspaceContext.config.onChange('additionalKits', () => kitsController.readKits(KitsReadMode.folderKits));
+        cmakeProject.workspaceContext.config.onChange('additionalKits', () => kitsController.readKits(KitsReadMode.folderKits));
 
         await kitsController.readKits(KitsReadMode.folderKits);
         return kitsController;
@@ -119,7 +85,7 @@ export class KitsController {
 
     get availableKits() {
         console.assert(KitsController.length > 0, 'readKits should have been called at least once before.');
-        if (this.cmakeTools.workspaceContext.config.showSystemKits) {
+        if (this.cmakeProject.workspaceContext.config.showSystemKits) {
             return KitsController.specialKits.concat(this.folderKits.concat(this.additionalKits.concat(KitsController.userKits)));
         } else {
             return KitsController.specialKits.concat(this.folderKits);
@@ -127,11 +93,11 @@ export class KitsController {
     }
 
     get folder() {
-        return this.cmakeTools.folder;
+        return this.cmakeProject.folder;
     }
 
-    static async readUserKits(cmakeTools: CMakeTools | undefined, progress?: ProgressHandle) {
-        if (undefined === cmakeTools) {
+    static async readUserKits(cmakeProject: CMakeProject | undefined, progress?: ProgressHandle) {
+        if (undefined === cmakeProject) {
             return;
         }
         // Read user kits if we are under userKits/allAvailable read mode, or if userKits is empty (which means userKits are never loaded)
@@ -159,10 +125,10 @@ export class KitsController {
         // Load user-kits
         reportProgress(localize('loading.kits', 'Loading kits'), progress);
 
-        KitsController.userKits = await readKitsFile(USER_KITS_FILEPATH);
+        KitsController.userKits = await readKitsFile(USER_KITS_FILEPATH, cmakeProject.workspaceContext.folder.uri.fsPath, await cmakeProject.getExpansionOptions());
 
         // Pruning requires user interaction, so it happens fully async
-        KitsController._startPruneOutdatedKitsAsync(cmakeTools);
+        KitsController._startPruneOutdatedKitsAsync(cmakeProject);
     }
 
     /**
@@ -170,20 +136,20 @@ export class KitsController {
      */
     async readKits(kitsReadMode = KitsReadMode.allAvailable, progress?: ProgressHandle) {
         if (kitsReadMode === KitsReadMode.userKits || kitsReadMode === KitsReadMode.allAvailable) {
-            await KitsController.readUserKits(this.cmakeTools, progress);
+            await KitsController.readUserKits(this.cmakeProject, progress);
         }
 
         if (kitsReadMode === KitsReadMode.folderKits || kitsReadMode === KitsReadMode.allAvailable) {
             // Read default folder kits
-            this.folderKits = await readKitsFile(KitsController._workspaceKitsPath(this.folder));
+            this.folderKits = await readKitsFile(KitsController._workspaceKitsPath(this.folder), this.cmakeProject.workspaceContext.folder.uri.fsPath, await this.cmakeProject.getExpansionOptions());
 
             // Read additional folder kits
-            this.additionalKits = await getAdditionalKits(this.cmakeTools);
+            this.additionalKits = await getAdditionalKits(this.cmakeProject);
         }
 
         // If the current kit was selected from the set that is updated with this call to readKits,
         // load it again to ensure it is up to date.
-        const current = this.cmakeTools.activeKit;
+        const current = this.cmakeProject.activeKit;
         if (current) {
             const searchKits: Kit[] = (kitsReadMode === KitsReadMode.allAvailable) ? this.availableKits :
                 (kitsReadMode === KitsReadMode.userKits) ? KitsController.userKits : this.folderKits.concat(this.additionalKits);
@@ -207,7 +173,7 @@ export class KitsController {
      * @param k The kit
      */
     async setFolderActiveKit(k: Kit | null): Promise<string> {
-        const inst = this.cmakeTools;
+        const inst = this.cmakeProject;
         const raw_name = k ? k.name : SpecialKits.Unspecified;
         if (inst) {
             // Generate a message that we will show in the progress notification
@@ -250,7 +216,7 @@ export class KitsController {
         if (!KitsController.checkingHaveKits) {
             KitsController.checkingHaveKits = true;
             if (!KitsController.minGWSearchDirs) {
-                await KitsController.scanForKits(this.cmakeTools);
+                await KitsController.scanForKits(this.cmakeProject);
             } else {
                 await vscode.commands.executeCommand('cmake.scanForKits');
             }
@@ -311,7 +277,7 @@ export class KitsController {
             return false;
         } else {
             if (chosen_kit.kit.name === SpecialKits.ScanForKits) {
-                await KitsController.scanForKits(this.cmakeTools);
+                await KitsController.scanForKits(this.cmakeProject);
                 return false;
             } else {
                 log.debug(localize('user.selected.kit', 'User selected kit {0}', JSON.stringify(chosen_kit)));
@@ -351,7 +317,7 @@ export class KitsController {
      *
      * Always returns immediately.
      */
-    private static _startPruneOutdatedKitsAsync(cmakeTools: CMakeTools) {
+    private static _startPruneOutdatedKitsAsync(cmakeProject: CMakeProject) {
         // Iterate over _user_ kits. We don't care about workspace-local kits
         for (const kit of KitsController.userKits) {
             if (kit.keep === true) {
@@ -407,9 +373,9 @@ export class KitsController {
                 }
                 switch (chosen.action) {
                     case 'keep':
-                        return KitsController._keepKit(cmakeTools, kit);
+                        return KitsController._keepKit(cmakeProject, kit);
                     case 'remove':
-                        return KitsController._removeKit(cmakeTools, kit);
+                        return KitsController._removeKit(cmakeProject, kit);
                 }
             });
             rollbar.takePromise(localize('pruning.kit', "Pruning kit"), { kit }, pr);
@@ -421,7 +387,7 @@ export class KitsController {
      * re-writes the user kits file.
      * @param kit The kit to mark
      */
-    private static async _keepKit(cmakeTools: CMakeTools, kit: Kit) {
+    private static async _keepKit(cmakeProject: CMakeProject, kit: Kit) {
         const new_kits = KitsController.userKits.map(k => {
             if (k.name === kit.name) {
                 return { ...k, keep: true };
@@ -430,24 +396,24 @@ export class KitsController {
             }
         });
         KitsController.userKits = new_kits;
-        return KitsController._writeUserKitsFile(cmakeTools, new_kits);
+        return KitsController._writeUserKitsFile(cmakeProject, new_kits);
     }
 
     /**
      * Remove a kit from the user-local kits.
      * @param kit The kit to remove
      */
-    private static async _removeKit(cmakeTools: CMakeTools, kit: Kit) {
+    private static async _removeKit(cmakeProject: CMakeProject, kit: Kit) {
         const new_kits = KitsController.userKits.filter(k => k.name !== kit.name);
         KitsController.userKits = new_kits;
-        return KitsController._writeUserKitsFile(cmakeTools, new_kits);
+        return KitsController._writeUserKitsFile(cmakeProject, new_kits);
     }
 
     /**
      * Write the given kits the the user-local cmake-kits.json file.
      * @param kits The kits to write to the file.
      */
-    private static async _writeUserKitsFile(cmakeTools: CMakeTools, kits: Kit[]) {
+    private static async _writeUserKitsFile(cmakeProject: CMakeProject, kits: Kit[]) {
         log.debug(localize('saving.kits.to', 'Saving kits to {0}', USER_KITS_FILEPATH));
 
         // Remove the special kits
@@ -492,7 +458,7 @@ export class KitsController {
                     }
                     switch (choice.do) {
                         case 'retry':
-                            return KitsController.scanForKits(cmakeTools);
+                            return KitsController.scanForKits(cmakeProject);
                         case 'cancel':
                             return false;
                     }
@@ -518,11 +484,11 @@ export class KitsController {
      *
      * @returns if any duplicate vs kits are removed.
      */
-    static async scanForKits(cmakeTools: CMakeTools) {
+    static async scanForKits(cmakeProject: CMakeProject) {
         log.debug(localize('rescanning.for.kits', 'Rescanning for kits'));
 
         // Do the scan:
-        const discovered_kits = await scanForKits(cmakeTools, { minGWSearchDirs: KitsController.minGWSearchDirs });
+        const discovered_kits = await scanForKits(cmakeProject, { minGWSearchDirs: KitsController.minGWSearchDirs });
 
         // The list with the new definition user kits starts with the non VS ones,
         // which do not have any variations in the way they can be defined.
@@ -608,9 +574,9 @@ export class KitsController {
 
         const new_kits = Object.keys(new_kits_by_name).map(k => new_kits_by_name[k]);
         KitsController.userKits = new_kits;
-        await KitsController._writeUserKitsFile(cmakeTools, new_kits);
+        await KitsController._writeUserKitsFile(cmakeProject, new_kits);
 
-        KitsController._startPruneOutdatedKitsAsync(cmakeTools);
+        KitsController._startPruneOutdatedKitsAsync(cmakeProject);
 
         return duplicateRemoved;
     }

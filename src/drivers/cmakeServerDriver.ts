@@ -1,6 +1,6 @@
 import { CMakeExecutable } from '@cmt/cmake/cmakeExecutable';
 import { InputFileSet } from '@cmt/dirty';
-import { ConfigureTrigger } from '@cmt/cmakeTools';
+import { ConfigureTrigger } from '@cmt/cmakeProject';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import * as api from '@cmt/api';
@@ -160,7 +160,7 @@ export class CMakeServerDriver extends CMakeDriver {
         })();
     }
 
-    protected async doConfigure(args: string[], consumer?: proc.OutputConsumer, showCommandOnly?: boolean) {
+    protected async doConfigure(args: string[], consumer?: proc.OutputConsumer, showCommandOnly?: boolean, configurePreset?: ConfigurePreset | null, _options?: proc.ExecutionOptions) {
         await this._clientChangeInProgress;
         const cl = await this.getClient();
         const sub = this.onMessage(msg => {
@@ -176,7 +176,9 @@ export class CMakeServerDriver extends CMakeDriver {
             log.info(proc.buildCmdStr(this.cmake.path, args));
         } else {
             try {
-                this._hadConfigurationChanged = false;
+                if (!configurePreset) {
+                    this._hadConfigurationChanged = false;
+                }
                 await cl.configure({ cacheArguments: args });
                 await cl.compute();
             } catch (e) {
@@ -427,7 +429,7 @@ export class CMakeServerDriver extends CMakeDriver {
             // that was done earlier by that ongoing configure process.
             if (!this.configOrBuildInProgress()) {
                 if (this.config.configureOnEdit) {
-                    log.debug(localize('cmakelists.save.trigger.reconfigure', "Detected 'cmake.sourceDirectory' setting update, attempting automatic reconfigure..."));
+                    log.debug(localize('cmakelists.save.trigger.reconfigure', "Detected {0} setting update, attempting automatic reconfigure...", "\'cmake.sourceDirectory\'"));
                     await this.configure(ConfigureTrigger.sourceDirectoryChange, []);
                 }
 
