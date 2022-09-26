@@ -21,6 +21,7 @@ abstract class Button {
     private _text: string = '';
     private _tooltip: string | null = null;
     private _icon: string | null = null;
+    private _running: boolean = false;
 
     constructor(protected readonly config: ConfigurationReader, protected readonly priority: number) {
         this.button = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, this.priority);
@@ -50,6 +51,15 @@ abstract class Button {
         this.update();
     }
 
+    get running(): boolean {
+        return this._running;
+    }
+
+    set running(v: boolean) {
+        this._running = v;
+        this.update();
+    }
+
     get bracketText(): string {
         return `[${this._text}]`;
     }
@@ -66,6 +76,9 @@ abstract class Button {
         this._icon = v ? `$(${v})` : null;
     }
 
+    get command(): string | null {
+        return this.button.command?.toString() || null;
+    }
     protected set command(v: string | null) {
         this.button.command = v || undefined;
     }
@@ -83,7 +96,7 @@ abstract class Button {
             this.button.hide();
             return;
         }
-        this.button.text = text;
+        this.button.text = this._running ? '$(sync~spin)' + text : text;
         this.button.tooltip = this._getTooltip() || undefined;
         this.button.show();
     }
@@ -736,5 +749,8 @@ export class StatusBar implements vscode.Disposable {
         this._configurePresetButton.hidden = !isUsing;
         this._buildPresetButton.hidden = !isUsing;
         this._testPresetButton.hidden = !isUsing;
+    }
+    setRunning(command: string, running: boolean) {
+        this._buttons.filter(btn => btn.command === command).forEach(btn => btn.running = running);
     }
 }

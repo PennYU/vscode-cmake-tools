@@ -239,6 +239,10 @@ class ExtensionManager implements vscode.Disposable {
         this.statusBar.setVisible(fullFeatureSet);
     }
 
+    public setRunning(command: string, running: boolean) {
+        this.statusBar.setRunning(command, running);
+    }
+
     public getCMTFolder(folder: vscode.WorkspaceFolder): CMakeToolsFolder | undefined {
         return this.folders.get(folder);
     }
@@ -1620,6 +1624,8 @@ async function setup(context: vscode.ExtensionContext, progress?: ProgressHandle
             const id = util.randint(1000, 10000);
             // Create a promise that resolves with the command.
             const pr = (async () => {
+                // update status bar to busy
+                ext.setRunning(`cmake.${name}`, true);
                 // Debug when the commands start/stop
                 log.debug(`[${id}]`, `cmake.${name}`, localize('started', 'started'));
                 // Bind the method
@@ -1633,6 +1639,8 @@ async function setup(context: vscode.ExtensionContext, progress?: ProgressHandle
                     // Log, but don't try to serialize the return value.
                     log.debug(localize('cmake.finished.returned.unserializable', '{0} finished (returned an unserializable value)', `[${id}] cmake.${name}`));
                 }
+                // update status bar to free
+                ext.setRunning(`cmake.${name}`, false);
                 // Return the result of the command.
                 return ret;
             })();
